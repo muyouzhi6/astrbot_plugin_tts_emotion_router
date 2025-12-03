@@ -152,7 +152,7 @@ class SessionState:
     "astrbot_plugin_tts_emotion_router",
     "木有知",
     "按情绪路由到不同音色的TTS插件",
-    "0.4.2",
+    "0.5.0",
 )
 class TTSEmotionRouter(Star):
     def __init__(self, context: Context, config: Optional[dict] = None):
@@ -952,7 +952,7 @@ class TTSEmotionRouter(Star):
             yield event.plain_result(f"正在生成测试音频：\"{text}\"...")
             
             start_time = time.time()
-            audio_path = self.tts.synth(text, voice, out_dir, speed=None)
+            audio_path = await self.tts.synth(text, voice, out_dir, speed=None)
             generation_time = time.time() - start_time
             
             if not audio_path:
@@ -989,7 +989,7 @@ class TTSEmotionRouter(Star):
             
             # 尝试发送音频
             try:
-                yield event.record_result(str(audio_path))
+                yield event.chain_result([Record(file=str(audio_path))])
             except Exception as e:
                 yield event.plain_result(f"❌ 音频发送失败: {e}")
             
@@ -1191,67 +1191,10 @@ class TTSEmotionRouter(Star):
                     pass
             except Exception:
                 pass
-    elif hasattr(filter, "on_after_message_sent"):
-        @filter.on_after_message_sent(priority=-1000)
-        async def after_message_sent(self, event: AstrMessageEvent):
-            # 仅记录诊断信息，不再清空链，避免影响历史写入/上下文。
-            try:
-                # 确保不被判定为终止传播
-                try:
-                    event.continue_event()
-                except Exception:
-                    pass
-                try:
-                    res = event.get_result()
-                    # 只读，不创建/修改 result，避免触发重复发送
-                    if res is not None and hasattr(res, "continue_event"):
-                        res.continue_event()
-                except Exception:
-                    pass
-                try:
-                    logging.debug("TTSEmotionRouter.after_message_sent: entry(is_compat) is_stopped=%s", event.is_stopped())
-                except Exception:
-                    pass
-                result = event.get_result()
-                if not result or not getattr(result, "chain", None):
-                    return
-                try:
-                    has_plain = any(isinstance(c, Plain) for c in result.chain)
-                    has_record = any(isinstance(c, Record) for c in result.chain)
-                    logging.info(
-                        "after_message_sent: snapshot len=%d, has_plain=%s, has_record=%s, is_llm=%s",
-                        len(result.chain), has_plain, has_record, getattr(result, "result_content_type", None) == ResultContentType.LLM_RESULT,
-                    )
-                except Exception:
-                    pass
-                # 兜底：若为 LLM 结果且包含任意语音（不局限于本插件），确保将可读文本写入对话历史
-                try:
-                    if any(isinstance(c, Record) for c in result.chain):
-                        await self._ensure_history_saved(event)
-                except Exception:
-                    pass
-                # 再次声明继续传播
-                try:
-                    event.continue_event()
-                except Exception:
-                    pass
-                try:
-                    res = event.get_result()
-                    if res is not None and hasattr(res, "continue_event"):
-                        res.continue_event()
-                except Exception:
-                    pass
-                # 兼容部分框架对“未产出/未修改”的停止判定，进行一次无害的 get_result 访问
-                try:
-                    _ = event.get_result()
-                except Exception:
-                    pass
-                try:
-                    logging.debug("TTSEmotionRouter.after_message_sent: exit(is_compat) is_stopped=%s", event.is_stopped())
-                except Exception:
-                    pass
-            except Exception:
-                pass
+    # elif hasattr(filter, "on_after_message_sent"):
+    #     # 兼容性代码：如果 filter 有 on_after_message_sent 属性，则使用它
+    #     # 但由于 Pylance 无法静态确定，这里注释掉以避免报错，运行时动态检查在上面已经处理
+    #     pass
     else:
         async def after_message_sent(self, event: AstrMessageEvent):
             return
@@ -1304,15 +1247,6 @@ class TTSEmotionRouter(Star):
             # 如果检查过程出错，继续后续处理
             pass
 
-        sid = self._sess_id(event)
-        if not self._is_session_enabled(sid):
-            logging.info("TTS skip: session disabled (%s)", sid)
-            try:
-                event.continue_event()
-            except Exception:
-                pass
-            return
-
         # 结果链
         result = event.get_result()
         if not result or not result.chain:
@@ -1323,18 +1257,20 @@ class TTSEmotionRouter(Star):
                 pass
             return
 
-        # 清理首个 Plain 的隐藏情绪头
+        # --- 核心修复：强制清理情绪标记 ---
+        # 无论 TTS 是否开启，都必须确保从最终文本中剥离情绪标记，
+        # 避免 [EMO:xxx] 泄露给用户。
         try:
             new_chain = []
             cleaned_once = False
             for comp in result.chain:
-                if (
-                    not cleaned_once
-                    and isinstance(comp, Plain)
-                    and getattr(comp, "text", None)
-                ):
+                if isinstance(comp, Plain) and getattr(comp, "text", None):
                     t0 = self._normalize_text(comp.text)
+                    # 1. 剥离头部连续标记
                     t, _ = self._strip_emo_head_many(t0)
+                    # 2. 剥离正文中任何位置的残留标记（更激进）
+                    t = self._strip_any_visible_markers(t)
+                    
                     if t:
                         new_chain.append(Plain(text=t))
                     cleaned_once = True
@@ -1343,6 +1279,16 @@ class TTSEmotionRouter(Star):
             result.chain = new_chain
         except Exception:
             pass
+        # -------------------------------
+
+        sid = self._sess_id(event)
+        if not self._is_session_enabled(sid):
+            logging.info("TTS skip: session disabled (%s)", sid)
+            try:
+                event.continue_event()
+            except Exception:
+                pass
+            return
 
         # 是否允许混合
         if not self.allow_mixed and any(not isinstance(c, Plain) for c in result.chain):
@@ -1487,7 +1433,7 @@ class TTSEmotionRouter(Star):
         # 不做生成级去重：重复发送问题通过结果链策略规避
 
         try:
-            audio_path = self.tts.synth(tts_text, voice, out_dir, speed=speed_override)
+            audio_path = await self.tts.synth(tts_text, voice, out_dir, speed=speed_override)
             
             # TTS 成功
             if audio_path and self._validate_audio_file(audio_path):
@@ -1617,8 +1563,13 @@ class TTSEmotionRouter(Star):
             for attempt in range(3):
                 try:
                     req = getattr(event, "get_extra", None) and event.get_extra("provider_request")
-                    if req and getattr(req, "conversation", None) and getattr(req.conversation, "cid", None):
-                        cid = req.conversation.cid
+                    # 修复：Pylance 报错，req 是字典，使用 .get() 安全访问
+                    if req and isinstance(req, dict):
+                        conv_dict = req.get("conversation")
+                        if conv_dict and hasattr(conv_dict, "cid"):
+                            cid = conv_dict.cid
+                        elif conv_dict and isinstance(conv_dict, dict):
+                            cid = conv_dict.get("cid")
                 except Exception:
                     cid = None
                 if not cid:

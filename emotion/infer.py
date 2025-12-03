@@ -35,6 +35,10 @@ def is_informational(text: str) -> bool:
 
 
 def classify(text: str, context: Optional[List[str]] = None) -> str:
+    # 如果是信息类文本，直接返回 neutral
+    if is_informational(text or ""):
+        return "neutral"
+
     t = (text or "").lower()
     score: Dict[str, float] = {"happy": 0.0, "sad": 0.0, "angry": 0.0}
 
@@ -51,7 +55,7 @@ def classify(text: str, context: Optional[List[str]] = None) -> str:
 
     # 感叹号、全大写等作为情绪增强
     if text and "!" in text:
-        score["angry"] += 1.0
+        score["angry"] += 0.5  # 降低感叹号的权重，避免误判
     if (
         text
         and text.strip()
@@ -62,22 +66,22 @@ def classify(text: str, context: Optional[List[str]] = None) -> str:
 
     # 上下文弱加权
     if context:
-        ctx = "\n".join(context[-3:]).lower()
-        for w in POS_WORDS:
-            if w.lower() in ctx:
-                score["happy"] += 0.3
-        for w in NEG_WORDS:
-            if w.lower() in ctx:
-                score["sad"] += 0.3
-        for w in ANG_WORDS:
-            if w.lower() in ctx:
-                score["angry"] += 0.3
-
-    if is_informational(text or ""):
-        return "neutral"
+        # 过滤非字符串类型的上下文
+        valid_context = [c for c in context if isinstance(c, str)]
+        if valid_context:
+            ctx = "\n".join(valid_context[-3:]).lower()
+            for w in POS_WORDS:
+                if w.lower() in ctx:
+                    score["happy"] += 0.2
+            for w in NEG_WORDS:
+                if w.lower() in ctx:
+                    score["sad"] += 0.2
+            for w in ANG_WORDS:
+                if w.lower() in ctx:
+                    score["angry"] += 0.2
 
     # 选最大，否则中性
     label = max(score.keys(), key=lambda k: score[k])
-    if score[label] <= 0:
+    if score[label] <= 0.5: # 提高阈值，微弱情绪倾向于 neutral
         return "neutral"
     return label

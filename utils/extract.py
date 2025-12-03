@@ -20,19 +20,16 @@ class CodeAndLinkExtractor:
 
     def __init__(self):
         # 正则表达式合并，并使用命名捕获组
-        code_block_pattern = r'```[a-zA-Z0-9_+-]*\n.*?\n```'
-        # 更严格的行内代码匹配，要求包含字母和数字，或包含下划线
-        # 匹配 `word_with_underscore` 或 `word1with2nums` 等
-        inline_code_pattern = r'`([a-zA-Z0-9_]*[a-zA-Z][a-zA-Z0-9_]*[0-9][a-zA-Z0-9_]*|[a-zA-Z0-9_]*_[a-zA-Z0-9_]*)`'
+        # 增强代码块匹配容错性：允许任意字符，非贪婪匹配
+        code_block_pattern = r'```[\s\S]*?```'
+        # 放宽行内代码匹配正则：匹配反引号包裹的非换行内容
+        inline_code_pattern = r'`[^`\n]+`'
         url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
-        # www_pattern = r'www\.[^\s<>"{}|\\^`\[\]]+\.[^\s<>"{}|\\^`\[\]]+'
         
-        # 注意：为了避免过于宽泛的匹配 (e.g., 'example.com') 导致问题，
-        # 这里暂时不包含 website_re。如果需要，可以更精确地加入。
         self.combined_re = re.compile(
             '|'.join([
                 f'(?P<CODE>{code_block_pattern}|{inline_code_pattern})',
-                f'(?P<LINK>{url_pattern})', # |{www_pattern}
+                f'(?P<LINK>{url_pattern})',
             ]),
             re.DOTALL | re.IGNORECASE
         )

@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Optional
 
 import logging
-import requests
+import aiohttp
+import asyncio
 
 
 class SiliconFlowTTS:
@@ -32,8 +33,8 @@ class SiliconFlowTTS:
         self.gain = gain
         self.sample_rate = sample_rate
 
-    def _is_audio_response(self, r: requests.Response) -> bool:
-        ct = r.headers.get("Content-Type", "").lower()
+    def _is_audio_response(self, content_type: str) -> bool:
+        ct = content_type.lower()
         return ct.startswith("audio/") or ct.startswith("application/octet-stream")
 
     def _validate_generated_file(self, file_path: Path) -> bool:
@@ -86,7 +87,7 @@ class SiliconFlowTTS:
             logging.error(f"SiliconFlowTTS: 文件验证失败: {e}")
             return False
 
-    def synth(
+    async def synth(
         self, text: str, voice: str, out_dir: Path, speed: Optional[float] = None
     ) -> Optional[Path]:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -135,64 +136,72 @@ class SiliconFlowTTS:
 
         last_err = None
         backoff = 1.0
-        for attempt in range(1, self.max_retries + 2):  # 尝试(重试N次+首次)=N+1 次
-            try:
-                r = requests.post(
-                    url, headers=headers, data=json.dumps(payload), timeout=self.timeout
-                )
-                # 2xx
-                if 200 <= r.status_code < 300:
-                    if not self._is_audio_response(r):
-                        # 可能是 JSON 错误
-                        try:
-                            err = r.json()
-                        except Exception:
-                            err = {"error": r.text[:200]}
-                        logging.error(
-                            f"SiliconFlowTTS: 返回非音频内容，code={r.status_code}, detail={err}"
-                        )
-                        last_err = err
-                        break
-                    
-                    # 写入文件
-                    with open(out_path, "wb") as f:
-                        f.write(r.content)
-                    
-                    # 验证生成的文件
-                    if not self._validate_generated_file(out_path):
-                        logging.error(f"SiliconFlowTTS: 生成的文件验证失败: {out_path}")
-                        last_err = {"error": "Generated audio file validation failed"}
-                        break
-                    
-                    logging.info(f"SiliconFlowTTS: 成功生成音频文件: {out_path} ({out_path.stat().st_size}字节)")
-                    return out_path
-
-                # 非 2xx
-                err_detail = None
+        
+        client_timeout = aiohttp.ClientTimeout(total=self.timeout)
+        
+        async with aiohttp.ClientSession(timeout=client_timeout) as session:
+            for attempt in range(1, self.max_retries + 2):  # 尝试(重试N次+首次)=N+1 次
                 try:
-                    err_detail = r.json()
-                except Exception:
-                    err_detail = {"error": r.text[:200]}
+                    async with session.post(
+                        url, headers=headers, json=payload
+                    ) as r:
+                        # 2xx
+                        if 200 <= r.status < 300:
+                            content_type = r.headers.get("Content-Type", "")
+                            if not self._is_audio_response(content_type):
+                                # 可能是 JSON 错误
+                                try:
+                                    err = await r.json()
+                                except Exception:
+                                    text_content = await r.text()
+                                    err = {"error": text_content[:200]}
+                                logging.error(
+                                    f"SiliconFlowTTS: 返回非音频内容，code={r.status}, detail={err}"
+                                )
+                                last_err = err
+                                break
+                            
+                            # 写入文件
+                            content = await r.read()
+                            with open(out_path, "wb") as f:
+                                f.write(content)
+                            
+                            # 验证生成的文件
+                            if not self._validate_generated_file(out_path):
+                                logging.error(f"SiliconFlowTTS: 生成的文件验证失败: {out_path}")
+                                last_err = {"error": "Generated audio file validation failed"}
+                                break
+                            
+                            logging.info(f"SiliconFlowTTS: 成功生成音频文件: {out_path} ({out_path.stat().st_size}字节)")
+                            return out_path
 
-                logging.warning(
-                    f"SiliconFlowTTS: 请求失败({r.status_code}) attempt={attempt}, detail={err_detail}"
-                )
-                last_err = err_detail
-                # 429 或 5xx 进行重试
-                if r.status_code in (429,) or 500 <= r.status_code < 600:
+                        # 非 2xx
+                        err_detail = None
+                        try:
+                            err_detail = await r.json()
+                        except Exception:
+                            text_content = await r.text()
+                            err_detail = {"error": text_content[:200]}
+
+                        logging.warning(
+                            f"SiliconFlowTTS: 请求失败({r.status}) attempt={attempt}, detail={err_detail}"
+                        )
+                        last_err = err_detail
+                        # 429 或 5xx 进行重试
+                        if r.status in (429,) or 500 <= r.status < 600:
+                            if attempt <= self.max_retries:
+                                await asyncio.sleep(backoff)
+                                backoff = min(backoff * 2, 8)
+                                continue
+                        break
+                except Exception as e:
+                    logging.warning(f"SiliconFlowTTS: 网络异常 attempt={attempt}, err={e}")
+                    last_err = str(e)
                     if attempt <= self.max_retries:
-                        time.sleep(backoff)
+                        await asyncio.sleep(backoff)
                         backoff = min(backoff * 2, 8)
                         continue
-                break
-            except Exception as e:
-                logging.warning(f"SiliconFlowTTS: 网络异常 attempt={attempt}, err={e}")
-                last_err = str(e)
-                if attempt <= self.max_retries:
-                    time.sleep(backoff)
-                    backoff = min(backoff * 2, 8)
-                    continue
-                break
+                    break
 
         # 失败清理
         try:

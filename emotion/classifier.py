@@ -12,4 +12,4 @@ class HeuristicClassifier:
 
     def classify(self, text: str, context: Optional[List[str]] = None) -> str:
         """简单启发式分类，必要时可替换为更强模型。"""
-        return heuristic_classify(text)
+        return heuristic_classify(text, context)
