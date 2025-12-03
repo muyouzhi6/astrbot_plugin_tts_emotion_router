@@ -24,7 +24,11 @@ class CodeAndLinkExtractor:
         code_block_pattern = r'```[\s\S]*?```'
         # 放宽行内代码匹配正则：匹配反引号包裹的非换行内容
         inline_code_pattern = r'`[^`\n]+`'
-        url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+        # URL 匹配增强：
+        # 1. 支持 http/https
+        # 2. 支持 www. 开头的域名（自动补全 http）
+        # 3. 排除末尾的标点符号
+        url_pattern = r'(?:https?://|www\.)[^\s<>"{}|\\^`\[\]\u4e00-\u9fa5]+'
         
         self.combined_re = re.compile(
             '|'.join([
