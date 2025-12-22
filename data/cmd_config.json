@@ -1,0 +1,123 @@
+﻿{
+  "config_version": 2,
+  "platform_settings": {
+    "plugin_enable": {},
+    "unique_session": false,
+    "rate_limit": {
+      "time": 60,
+      "count": 30,
+      "strategy": "stall"
+    },
+    "reply_prefix": "",
+    "forward_threshold": 1500,
+    "enable_id_white_list": true,
+    "id_whitelist": [],
+    "id_whitelist_log": true,
+    "wl_ignore_admin_on_group": true,
+    "wl_ignore_admin_on_friend": true,
+    "reply_with_mention": false,
+    "reply_with_quote": false,
+    "path_mapping": [],
+    "segmented_reply": {
+      "enable": false,
+      "only_llm_result": true,
+      "interval_method": "random",
+      "interval": "1.5,3.5",
+      "log_base": 2.6,
+      "words_count_threshold": 150,
+      "regex": ".*?[。？！~…]+|.+$",
+      "content_cleanup_rule": ""
+    },
+    "no_permission_reply": true,
+    "empty_mention_waiting": true,
+    "empty_mention_waiting_need_reply": true,
+    "friend_message_needs_wake_prefix": false,
+    "ignore_bot_self_message": false,
+    "ignore_at_all": false
+  },
+  "provider": [],
+  "provider_settings": {
+    "enable": true,
+    "default_provider_id": "",
+    "wake_prefix": "",
+    "web_search": false,
+    "web_search_link": false,
+    "display_reasoning_text": false,
+    "identifier": false,
+    "datetime_system_prompt": true,
+    "default_personality": "default",
+    "prompt_prefix": "",
+    "max_context_length": -1,
+    "dequeue_context_length": 1,
+    "streaming_response": false,
+    "show_tool_use_status": false,
+    "streaming_segmented": false,
+    "separate_provider": true,
+    "max_agent_step": 30
+  },
+  "provider_stt_settings": {
+    "enable": false,
+    "provider_id": ""
+  },
+  "provider_tts_settings": {
+    "enable": false,
+    "provider_id": "",
+    "dual_output": false,
+    "use_file_service": false
+  },
+  "provider_ltm_settings": {
+    "group_icl_enable": false,
+    "group_message_max_cnt": 300,
+    "image_caption": false,
+    "image_caption_provider_id": "",
+    "image_caption_prompt": "Please describe the image using Chinese.",
+    "active_reply": {
+      "enable": false,
+      "method": "possibility_reply",
+      "possibility_reply": 0.1,
+      "prompt": "",
+      "whitelist": []
+    }
+  },
+  "content_safety": {
+    "also_use_in_response": false,
+    "internal_keywords": {
+      "enable": true,
+      "extra_keywords": []
+    },
+    "baidu_aip": {
+      "enable": false,
+      "app_id": "",
+      "api_key": "",
+      "secret_key": ""
+    }
+  },
+  "admins_id": [
+    "astrbot"
+  ],
+  "t2i": false,
+  "t2i_word_threshold": 150,
+  "t2i_strategy": "remote",
+  "t2i_endpoint": "",
+  "t2i_use_file_service": false,
+  "http_proxy": "",
+  "dashboard": {
+    "enable": true,
+    "username": "astrbot",
+    "password": "77b90590a8945a7d36c963981a307dc9",
+    "jwt_secret": "",
+    "host": "0.0.0.0",
+    "port": 6185
+  },
+  "platform": [],
+  "wake_prefix": [
+    "/"
+  ],
+  "log_level": "INFO",
+  "pip_install_arg": "",
+  "pypi_index_url": "https://mirrors.aliyun.com/pypi/simple/",
+  "knowledge_db": {},
+  "persona": [],
+  "timezone": "",
+  "callback_api_base": ""
+}
