@@ -1,6 +1,6 @@
 # 🎭 AstrBot TTS 情绪路由插件
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/muyouzhi6/astrbot_plugin_tts_emotion_router)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/muyouzhi6/astrbot_plugin_tts_emotion_router)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
 
@@ -352,7 +352,10 @@ timeout: 15         # 缩短超时时间
 ```
 
 ## 📈 版本历史
-- **v0.5.0** (当前)
+- **v1.0.0** (当前)
+   - 🚀 版本更新：全面重构优化性能。
+
+- **v0.5.0** 
    - 🚀 版本更新：功能增强与稳定性优化。
 
 - **v0.4.4**
@@ -427,6 +430,7 @@ timeout: 15         # 缩短超时时间
 *让每一句话都充满感情！*
 
 </div>
+
 
 
 
