@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 # 初始化兼容性处理（必须在其他 astrbot 导入之前）
 from .core.compat import initialize_compat
@@ -47,6 +47,11 @@ from .core.constants import (
     AUDIO_CLEANUP_TTL_SECONDS,
     HISTORY_WRITE_DELAY,
 )
+
+# 会话状态清理常量
+SESSION_CLEANUP_INTERVAL = 3600  # 每小时检查一次
+SESSION_MAX_IDLE_TIME = 86400  # 24小时无活动则清理
+SESSION_MAX_COUNT = 10000  # 最大会话数量
 from .core.session import SessionState
 from .core.config import ConfigManager
 from .core.marker import EmotionMarkerProcessor
@@ -89,16 +94,33 @@ class TTSEmotionRouter(Star, CommandHandlers):
         self._session_state: Dict[str, SessionState] = {}
         self._inflight_sigs: set[str] = set()
         
-        # 初始化临时目录
+        # 后台任务引用（用于在卸载时取消）
+        self._background_tasks: List[asyncio.Task] = []
+        self._cleanup_task_started: bool = False
+        
+        # 初始化临时目录（同步，因为在初始化阶段）
         ensure_dir(TEMP_DIR)
-        # 异步清理临时目录
-        asyncio.create_task(cleanup_dir(TEMP_DIR, ttl_seconds=AUDIO_CLEANUP_TTL_SECONDS))
     
     async def terminate(self):
         """插件卸载时清理资源。"""
+        # 取消所有后台任务
+        for task in self._background_tasks:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._background_tasks.clear()
+        
+        # 关闭 TTS 客户端
         if hasattr(self, "tts_client"):
             await self.tts_client.close()
             logging.info("TTSEmotionRouter: tts client closed")
+        
+        # 清理会话状态
+        self._session_state.clear()
+        logging.info("TTSEmotionRouter: session state cleared")
 
     def _init_config(self, config: Optional[dict]) -> None:
         """初始化配置。"""
@@ -176,9 +198,20 @@ class TTSEmotionRouter(Star, CommandHandlers):
     
     # ==================== 配置保存 ====================
     
+    async def _save_config_async(self) -> None:
+        """异步保存配置（推荐使用）。"""
+        await self.config.save_async()
+        self._update_components_from_config()
+    
     def _save_config(self) -> None:
-        """保存配置。"""
+        """同步保存配置（已废弃，仅用于兼容）。"""
+        # 警告：此方法会阻塞事件循环，请使用 _save_config_async
+        logging.warning("TTSEmotionRouter: _save_config() is deprecated, use _save_config_async() instead")
         self.config.save()
+        self._update_components_from_config()
+    
+    def _update_components_from_config(self) -> None:
+        """从配置更新组件状态。"""
         # 更新组件状态
         self.condition_checker.prob = self.config.get_prob()
         self.condition_checker.text_limit = self.config.get_text_limit()
@@ -220,6 +253,83 @@ class TTSEmotionRouter(Star, CommandHandlers):
 
     def _get_session_state(self, sid: str) -> SessionState:
         return self._session_state.setdefault(sid, SessionState())
+    
+    async def _start_background_tasks(self) -> None:
+        """启动后台任务（在首次处理消息时调用）。"""
+        if self._cleanup_task_started:
+            return
+        self._cleanup_task_started = True
+        
+        # 启动临时文件清理任务
+        audio_cleanup_task = asyncio.create_task(
+            self._periodic_audio_cleanup(),
+            name="tts_audio_cleanup"
+        )
+        self._background_tasks.append(audio_cleanup_task)
+        
+        # 启动会话状态清理任务
+        session_cleanup_task = asyncio.create_task(
+            self._periodic_session_cleanup(),
+            name="tts_session_cleanup"
+        )
+        self._background_tasks.append(session_cleanup_task)
+        
+        logging.info("TTSEmotionRouter: background tasks started")
+    
+    async def _periodic_audio_cleanup(self) -> None:
+        """定期清理临时音频文件。"""
+        try:
+            while True:
+                await cleanup_dir(TEMP_DIR, ttl_seconds=AUDIO_CLEANUP_TTL_SECONDS)
+                await asyncio.sleep(AUDIO_CLEANUP_TTL_SECONDS // 2)  # 每隔一半TTL时间清理一次
+        except asyncio.CancelledError:
+            logging.debug("TTSEmotionRouter: audio cleanup task cancelled")
+            raise
+        except Exception as e:
+            logging.error(f"TTSEmotionRouter: audio cleanup error: {e}")
+    
+    async def _periodic_session_cleanup(self) -> None:
+        """定期清理过期会话状态，防止内存泄漏。"""
+        try:
+            while True:
+                await asyncio.sleep(SESSION_CLEANUP_INTERVAL)
+                await self._cleanup_stale_sessions()
+        except asyncio.CancelledError:
+            logging.debug("TTSEmotionRouter: session cleanup task cancelled")
+            raise
+        except Exception as e:
+            logging.error(f"TTSEmotionRouter: session cleanup error: {e}")
+    
+    async def _cleanup_stale_sessions(self) -> None:
+        """清理过期的会话状态。"""
+        import time
+        now = time.time()
+        stale_sessions = []
+        
+        for sid, state in self._session_state.items():
+            # 检查是否超过最大空闲时间
+            if now - state.last_ts > SESSION_MAX_IDLE_TIME:
+                stale_sessions.append(sid)
+        
+        # 如果会话数量超过限制，额外清理最久未使用的会话
+        if len(self._session_state) > SESSION_MAX_COUNT:
+            # 按最后活跃时间排序
+            sorted_sessions = sorted(
+                self._session_state.items(),
+                key=lambda x: x[1].last_ts
+            )
+            # 清理超出限制的会话（保留最近活跃的）
+            excess_count = len(self._session_state) - SESSION_MAX_COUNT
+            for sid, _ in sorted_sessions[:excess_count]:
+                if sid not in stale_sessions:
+                    stale_sessions.append(sid)
+        
+        # 执行清理
+        for sid in stale_sessions:
+            del self._session_state[sid]
+        
+        if stale_sessions:
+            logging.info(f"TTSEmotionRouter: cleaned up {len(stale_sessions)} stale sessions, remaining: {len(self._session_state)}")
     
     # ==================== 文本处理代理 ====================
     # 为了保持与 CommandHandlers 的兼容性，保留这些方法
@@ -364,6 +474,9 @@ class TTSEmotionRouter(Star, CommandHandlers):
     @filter.on_decorating_result(priority=-1000)
     async def on_decorating_result(self, event: AstrMessageEvent):
         """核心 TTS 处理逻辑。"""
+        # 启动后台任务（仅首次）
+        await self._start_background_tasks()
+        
         # 声明继续传播
         try:
             event.continue_event()
