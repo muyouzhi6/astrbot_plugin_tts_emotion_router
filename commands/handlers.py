@@ -386,8 +386,7 @@ class CommandHandlers:
             # 尝试创建 Record 对象
             try:
                 from ..core.compat import import_message_components
-                comps = import_message_components()
-                Record = comps[0]
+                Record, _ = import_message_components()
                 record = Record(file=normalized_path)
                 record_status = "✅ 成功"
             except Exception as e:

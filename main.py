@@ -29,7 +29,7 @@ from .core.compat import (
 # 获取兼容的类和模块
 AstrMessageEvent = import_astr_message_event()
 filter = import_filter()
-Record, Plain, At, Reply, Image = import_message_components()
+Record, Plain = import_message_components()
 Context, Star, register = import_context_and_star()
 AstrBotConfig = import_astrbot_config()
 LLMResponse = import_llm_response()
@@ -241,9 +241,15 @@ class TTSEmotionRouter(Star, CommandHandlers):
         except Exception as e:
             logging.debug(f"TTSEmotionRouter._sess_id: failed to get group_id: {e}")
             gid = ""
-        if gid:
-            return f"group_{gid}"
-        return f"user_{event.get_sender_id()}"
+        
+        # 确保 gid 是真正有效的群组 ID（非空、非 None 字符串）
+        if gid and gid not in ("", "None", "null", "0"):
+            sid = f"group_{gid}"
+        else:
+            sid = f"user_{event.get_sender_id()}"
+        
+        logging.info(f"TTSEmotionRouter._sess_id: gid={gid!r}, sender={event.get_sender_id()}, result={sid}")
+        return sid
     
     def _is_session_enabled(self, sid: str) -> bool:
         """检查会话是否启用 TTS。"""
@@ -474,6 +480,8 @@ class TTSEmotionRouter(Star, CommandHandlers):
     @filter.on_decorating_result(priority=-1000)
     async def on_decorating_result(self, event: AstrMessageEvent):
         """核心 TTS 处理逻辑。"""
+        logging.info("TTSEmotionRouter.on_decorating_result: ENTRY")
+        
         # 启动后台任务（仅首次）
         await self._start_background_tasks()
         
@@ -495,6 +503,7 @@ class TTSEmotionRouter(Star, CommandHandlers):
         try:
             result = event.get_result()
             if not result:
+                logging.info("TTS skip: no result object")
                 return
                 
             is_llm_response = False
@@ -503,10 +512,14 @@ class TTSEmotionRouter(Star, CommandHandlers):
             except Exception:
                 is_llm_response = (getattr(result, "result_content_type", None) == ResultContentType.LLM_RESULT)
             
+            logging.info(f"TTS check: is_llm_response={is_llm_response}, chain_len={len(result.chain) if result.chain else 0}")
+            
             if not is_llm_response:
+                logging.info("TTS skip: not LLM response")
                 return # 静默跳过非 LLM 消息
                 
             if not result.chain:
+                logging.info("TTS skip: empty chain")
                 return
         except Exception as e:
             logging.warning(f"TTS: error checking response type: {e}")
@@ -514,6 +527,7 @@ class TTSEmotionRouter(Star, CommandHandlers):
             
         # 2. 会话开关检查
         sid = self._sess_id(event)
+        logging.info(f"TTS check: sid={sid}, global_enable={self.global_enable}, enabled_count={len(self.enabled_sessions)}, disabled_count={len(self.disabled_sessions)}")
         if not self._is_session_enabled(sid):
             logging.info("TTS skip: session disabled (%s)", sid)
             return
@@ -570,8 +584,19 @@ class TTSEmotionRouter(Star, CommandHandlers):
 
         # 7. 条件检查 (Condition Checker)
         st = self._get_session_state(sid)
-        # 允许 At 和 Reply 组件共存，不视为混合内容
-        has_non_plain = any(not isinstance(c, (Plain, At, Reply)) for c in result.chain)
+        
+        # 混合内容检查：允许 Plain, At, Reply, Image, Face 等组件
+        # 使用类名字符串匹配，避免不同版本的导入问题
+        ALLOWED_COMPONENTS = {"Plain", "At", "Reply", "Image", "Face"}
+        has_non_plain = False
+        non_plain_types = []
+        for c in result.chain:
+            c_type = type(c).__name__
+            if c_type not in ALLOWED_COMPONENTS:
+                has_non_plain = True
+                non_plain_types.append(c_type)
+        
+        logging.info(f"TTS check: tts_text_len={len(tts_text)}, has_non_plain={has_non_plain}, non_plain_types={non_plain_types}")
         
         check_res = self.condition_checker.check_all(tts_text, st, has_non_plain)
         if not check_res.passed:
@@ -590,7 +615,9 @@ class TTSEmotionRouter(Star, CommandHandlers):
 
         try:
             # 9. 执行 TTS 处理 (Core Processor)
+            logging.info(f"TTS: starting TTS processing for text: {tts_text[:50]}...")
             proc_res = await self.tts_processor.process(tts_text, st)
+            logging.info(f"TTS: process result: success={proc_res.success}, audio_path={proc_res.audio_path}, error={proc_res.error}")
             
             if proc_res.success and proc_res.audio_path:
                 # 10. 构建结果 (Result Builder)
