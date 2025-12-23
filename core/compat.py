@@ -175,17 +175,17 @@ def import_message_components() -> tuple:
     兼容不同 AstrBot 版本的消息组件导入。
     
     Returns:
-        (Record, Plain) 元组
+        (Record, Plain, At, Reply, Image) 元组
     """
     try:
         # 优先使用 core 版本的组件类型以匹配 RespondStage 校验逻辑
-        from astrbot.core.message.components import Record, Plain
-        return Record, Plain
+        from astrbot.core.message.components import Record, Plain, At, Reply, Image
+        return Record, Plain, At, Reply, Image
     except Exception:
         logger.debug("Components Record/Plain not found in core.message.components, falling back to api.message_components")
         # 旧版本回退
-        from astrbot.api.message_components import Record, Plain
-        return Record, Plain
+        from astrbot.api.message_components import Record, Plain, At, Reply, Image
+        return Record, Plain, At, Reply, Image
 
 
 def import_context_and_star() -> tuple:

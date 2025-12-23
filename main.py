@@ -29,7 +29,7 @@ from .core.compat import (
 # 获取兼容的类和模块
 AstrMessageEvent = import_astr_message_event()
 filter = import_filter()
-Record, Plain = import_message_components()
+Record, Plain, At, Reply, Image = import_message_components()
 Context, Star, register = import_context_and_star()
 AstrBotConfig = import_astrbot_config()
 LLMResponse = import_llm_response()
@@ -570,7 +570,8 @@ class TTSEmotionRouter(Star, CommandHandlers):
 
         # 7. 条件检查 (Condition Checker)
         st = self._get_session_state(sid)
-        has_non_plain = any(not isinstance(c, Plain) for c in result.chain)
+        # 允许 At 和 Reply 组件共存，不视为混合内容
+        has_non_plain = any(not isinstance(c, (Plain, At, Reply)) for c in result.chain)
         
         check_res = self.condition_checker.check_all(tts_text, st, has_non_plain)
         if not check_res.passed:
