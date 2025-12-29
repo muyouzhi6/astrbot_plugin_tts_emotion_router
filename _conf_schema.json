@@ -2,21 +2,28 @@
   "global_enable": {
     "description": "全局开关（黑名单模式）",
     "type": "bool",
-    "hint": "true=默认启用，使用 disabled_sessions 拉黑；false=默认关闭，使用 enabled_sessions 放行",
+    "hint": "true=默认启用，使用 disabled_umos 拉黑；false=默认关闭，使用 enabled_umos 放行",
     "default": true
   },
-  "enabled_sessions": {
-    "description": "白名单会话（仅在全局关闭时生效）",
+  "enabled_umos": {
+    "description": "白名单 UMO 列表（仅在全局关闭时生效）",
     "type": "list",
     "items": { "type": "string" },
-    "hint": "如 user_123 或 group_456",
+    "hint": "UMO 格式为 platform:message_type:session_id，可通过 /sid 命令获取",
     "default": []
   },
-  "disabled_sessions": {
-    "description": "黑名单会话（仅在全局开启时生效）",
+  "disabled_umos": {
+    "description": "黑名单 UMO 列表（仅在全局开启时生效）",
     "type": "list",
     "items": { "type": "string" },
-    "hint": "如 user_123 或 group_456",
+    "hint": "UMO 格式为 platform:message_type:session_id，可通过 /sid 命令获取",
+    "default": []
+  },
+  "text_voice_umos": {
+    "description": "文字+语音同显 UMO 列表",
+    "type": "list",
+    "items": { "type": "string" },
+    "hint": "对于这些会话，先发文字消息再发语音。UMO 可通过 /sid 命令获取",
     "default": []
   },
   "prob": {

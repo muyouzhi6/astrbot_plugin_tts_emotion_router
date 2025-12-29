@@ -253,12 +253,69 @@ class ConfigManager:
         return bool(self.get("global_enable", True))
     
     def get_enabled_sessions(self) -> List[str]:
-        """获取白名单会话列表。"""
+        """获取白名单会话列表（已废弃，请使用 get_enabled_umos）。"""
+        # 向后兼容：优先读取新的 enabled_umos，如果不存在则尝试读取旧的 enabled_sessions
+        umos = self.get("enabled_umos", None)
+        if umos is not None:
+            return list(umos)
         return list(self.get("enabled_sessions", []))
     
     def get_disabled_sessions(self) -> List[str]:
-        """获取黑名单会话列表。"""
+        """获取黑名单会话列表（已废弃，请使用 get_disabled_umos）。"""
+        # 向后兼容：优先读取新的 disabled_umos，如果不存在则尝试读取旧的 disabled_sessions
+        umos = self.get("disabled_umos", None)
+        if umos is not None:
+            return list(umos)
         return list(self.get("disabled_sessions", []))
+    
+    def get_enabled_umos(self) -> List[str]:
+        """
+        获取白名单 UMO（统一消息来源）列表。
+        
+        UMO 格式示例：
+        - 私聊: "GroupId_UserId"（如 "0_123456"）
+        - 群聊: "GroupId_UserId"（如 "789_123456"）
+        
+        可通过 /sid 命令获取当前会话的 UMO 值。
+        
+        Returns:
+            List[str]: 白名单 UMO 列表
+        """
+        # 向后兼容：优先读取新的 enabled_umos，如果不存在则尝试读取旧的 enabled_sessions
+        umos = self.get("enabled_umos", None)
+        if umos is not None:
+            return list(umos)
+        return list(self.get("enabled_sessions", []))
+    
+    def get_disabled_umos(self) -> List[str]:
+        """
+        获取黑名单 UMO（统一消息来源）列表。
+        
+        UMO 格式示例：
+        - 私聊: "GroupId_UserId"（如 "0_123456"）
+        - 群聊: "GroupId_UserId"（如 "789_123456"）
+        
+        可通过 /sid 命令获取当前会话的 UMO 值。
+        
+        Returns:
+            List[str]: 黑名单 UMO 列表
+        """
+        # 向后兼容：优先读取新的 disabled_umos，如果不存在则尝试读取旧的 disabled_sessions
+        umos = self.get("disabled_umos", None)
+        if umos is not None:
+            return list(umos)
+        return list(self.get("disabled_sessions", []))
+    
+    def get_text_voice_umos(self) -> List[str]:
+        """
+        获取文字+语音同显 UMO 列表。
+        
+        在此列表中的 UMO 会同时发送文字和语音消息。
+        
+        Returns:
+            List[str]: 文字+语音同显 UMO 列表
+        """
+        return list(self.get("text_voice_umos", []))
     
     def get_prob(self) -> float:
         """获取 TTS 触发概率。"""
@@ -311,81 +368,232 @@ class ConfigManager:
             return emo_cfg.get("keywords", {}) or {}
         return {}
 
-    # ==================== 会话管理 ====================
+    # ==================== 会话管理（UMO 版本） ====================
     
     def is_session_enabled(self, session_id: str, global_enable: bool) -> bool:
         """
-        检查会话是否启用 TTS。
+        检查会话是否启用 TTS（已废弃，请使用 is_umo_enabled）。
         
         Args:
-            session_id: 会话 ID
+            session_id: 会话 ID（现在应使用 UMO）
             global_enable: 当前全局开关状态
             
         Returns:
             如果会话启用 TTS 返回 True
         """
+        return self.is_umo_enabled(session_id, global_enable)
+    
+    def is_umo_enabled(self, umo: str, global_enable: bool) -> bool:
+        """
+        检查 UMO（统一消息来源）是否启用 TTS。
+        
+        Args:
+            umo: 统一消息来源标识（可通过 /sid 命令获取）
+            global_enable: 当前全局开关状态
+            
+        Returns:
+            如果该 UMO 启用 TTS 返回 True
+        """
         if global_enable:
             # 黑名单模式：默认开启，在黑名单中则关闭
-            return session_id not in self.get_disabled_sessions()
+            return umo not in self.get_disabled_umos()
         else:
             # 白名单模式：默认关闭，在白名单中则开启
-            return session_id in self.get_enabled_sessions()
+            return umo in self.get_enabled_umos()
+    
+    def is_text_voice_enabled_for_umo(self, umo: str) -> bool:
+        """
+        检查 UMO 是否启用文字+语音同显。
+        
+        Args:
+            umo: 统一消息来源标识
+            
+        Returns:
+            如果该 UMO 启用文字+语音同显返回 True
+        """
+        return umo in self.get_text_voice_umos()
+    
+    # ---------- 白名单操作（UMO 版本） ----------
     
     def add_to_enabled(self, session_id: str) -> None:
-        """添加会话到白名单（同步）。"""
-        sessions = self.get_enabled_sessions()
-        if session_id not in sessions:
-            sessions.append(session_id)
-            self.set("enabled_sessions", sessions, save=True)
+        """添加会话到白名单（同步，已废弃，请使用 add_to_enabled_umos）。"""
+        self.add_to_enabled_umos(session_id)
 
     async def add_to_enabled_async(self, session_id: str) -> None:
-        """添加会话到白名单（异步）。"""
-        sessions = self.get_enabled_sessions()
-        if session_id not in sessions:
-            sessions.append(session_id)
-            await self.set_async("enabled_sessions", sessions, save=True)
+        """添加会话到白名单（异步，已废弃，请使用 add_to_enabled_umos_async）。"""
+        await self.add_to_enabled_umos_async(session_id)
+    
+    def add_to_enabled_umos(self, umo: str) -> None:
+        """
+        添加 UMO 到白名单（同步）。
+        
+        Args:
+            umo: 统一消息来源标识（可通过 /sid 命令获取）
+        """
+        umos = self.get_enabled_umos()
+        if umo not in umos:
+            umos.append(umo)
+            self.set("enabled_umos", umos, save=True)
+    
+    async def add_to_enabled_umos_async(self, umo: str) -> None:
+        """
+        添加 UMO 到白名单（异步）。
+        
+        Args:
+            umo: 统一消息来源标识（可通过 /sid 命令获取）
+        """
+        umos = self.get_enabled_umos()
+        if umo not in umos:
+            umos.append(umo)
+            await self.set_async("enabled_umos", umos, save=True)
     
     def remove_from_enabled(self, session_id: str) -> None:
-        """从白名单移除会话（同步）。"""
-        sessions = self.get_enabled_sessions()
-        if session_id in sessions:
-            sessions.remove(session_id)
-            self.set("enabled_sessions", sessions, save=True)
+        """从白名单移除会话（同步，已废弃，请使用 remove_from_enabled_umos）。"""
+        self.remove_from_enabled_umos(session_id)
 
     async def remove_from_enabled_async(self, session_id: str) -> None:
-        """从白名单移除会话（异步）。"""
-        sessions = self.get_enabled_sessions()
-        if session_id in sessions:
-            sessions.remove(session_id)
-            await self.set_async("enabled_sessions", sessions, save=True)
+        """从白名单移除会话（异步，已废弃，请使用 remove_from_enabled_umos_async）。"""
+        await self.remove_from_enabled_umos_async(session_id)
+    
+    def remove_from_enabled_umos(self, umo: str) -> None:
+        """
+        从白名单移除 UMO（同步）。
+        
+        Args:
+            umo: 统一消息来源标识
+        """
+        umos = self.get_enabled_umos()
+        if umo in umos:
+            umos.remove(umo)
+            self.set("enabled_umos", umos, save=True)
+    
+    async def remove_from_enabled_umos_async(self, umo: str) -> None:
+        """
+        从白名单移除 UMO（异步）。
+        
+        Args:
+            umo: 统一消息来源标识
+        """
+        umos = self.get_enabled_umos()
+        if umo in umos:
+            umos.remove(umo)
+            await self.set_async("enabled_umos", umos, save=True)
+    
+    # ---------- 黑名单操作（UMO 版本） ----------
     
     def add_to_disabled(self, session_id: str) -> None:
-        """添加会话到黑名单（同步）。"""
-        sessions = self.get_disabled_sessions()
-        if session_id not in sessions:
-            sessions.append(session_id)
-            self.set("disabled_sessions", sessions, save=True)
+        """添加会话到黑名单（同步，已废弃，请使用 add_to_disabled_umos）。"""
+        self.add_to_disabled_umos(session_id)
 
     async def add_to_disabled_async(self, session_id: str) -> None:
-        """添加会话到黑名单（异步）。"""
-        sessions = self.get_disabled_sessions()
-        if session_id not in sessions:
-            sessions.append(session_id)
-            await self.set_async("disabled_sessions", sessions, save=True)
+        """添加会话到黑名单（异步，已废弃，请使用 add_to_disabled_umos_async）。"""
+        await self.add_to_disabled_umos_async(session_id)
+    
+    def add_to_disabled_umos(self, umo: str) -> None:
+        """
+        添加 UMO 到黑名单（同步）。
+        
+        Args:
+            umo: 统一消息来源标识（可通过 /sid 命令获取）
+        """
+        umos = self.get_disabled_umos()
+        if umo not in umos:
+            umos.append(umo)
+            self.set("disabled_umos", umos, save=True)
+    
+    async def add_to_disabled_umos_async(self, umo: str) -> None:
+        """
+        添加 UMO 到黑名单（异步）。
+        
+        Args:
+            umo: 统一消息来源标识（可通过 /sid 命令获取）
+        """
+        umos = self.get_disabled_umos()
+        if umo not in umos:
+            umos.append(umo)
+            await self.set_async("disabled_umos", umos, save=True)
     
     def remove_from_disabled(self, session_id: str) -> None:
-        """从黑名单移除会话（同步）。"""
-        sessions = self.get_disabled_sessions()
-        if session_id in sessions:
-            sessions.remove(session_id)
-            self.set("disabled_sessions", sessions, save=True)
+        """从黑名单移除会话（同步，已废弃，请使用 remove_from_disabled_umos）。"""
+        self.remove_from_disabled_umos(session_id)
 
     async def remove_from_disabled_async(self, session_id: str) -> None:
-        """从黑名单移除会话（异步）。"""
-        sessions = self.get_disabled_sessions()
-        if session_id in sessions:
-            sessions.remove(session_id)
-            await self.set_async("disabled_sessions", sessions, save=True)
+        """从黑名单移除会话（异步，已废弃，请使用 remove_from_disabled_umos_async）。"""
+        await self.remove_from_disabled_umos_async(session_id)
+    
+    def remove_from_disabled_umos(self, umo: str) -> None:
+        """
+        从黑名单移除 UMO（同步）。
+        
+        Args:
+            umo: 统一消息来源标识
+        """
+        umos = self.get_disabled_umos()
+        if umo in umos:
+            umos.remove(umo)
+            self.set("disabled_umos", umos, save=True)
+    
+    async def remove_from_disabled_umos_async(self, umo: str) -> None:
+        """
+        从黑名单移除 UMO（异步）。
+        
+        Args:
+            umo: 统一消息来源标识
+        """
+        umos = self.get_disabled_umos()
+        if umo in umos:
+            umos.remove(umo)
+            await self.set_async("disabled_umos", umos, save=True)
+    
+    # ---------- 文字+语音同显操作（新增） ----------
+    
+    def add_to_text_voice_umos(self, umo: str) -> None:
+        """
+        添加 UMO 到文字+语音同显列表（同步）。
+        
+        Args:
+            umo: 统一消息来源标识（可通过 /sid 命令获取）
+        """
+        umos = self.get_text_voice_umos()
+        if umo not in umos:
+            umos.append(umo)
+            self.set("text_voice_umos", umos, save=True)
+    
+    async def add_to_text_voice_umos_async(self, umo: str) -> None:
+        """
+        添加 UMO 到文字+语音同显列表（异步）。
+        
+        Args:
+            umo: 统一消息来源标识（可通过 /sid 命令获取）
+        """
+        umos = self.get_text_voice_umos()
+        if umo not in umos:
+            umos.append(umo)
+            await self.set_async("text_voice_umos", umos, save=True)
+    
+    def remove_from_text_voice_umos(self, umo: str) -> None:
+        """
+        从文字+语音同显列表移除 UMO（同步）。
+        
+        Args:
+            umo: 统一消息来源标识
+        """
+        umos = self.get_text_voice_umos()
+        if umo in umos:
+            umos.remove(umo)
+            self.set("text_voice_umos", umos, save=True)
+    
+    async def remove_from_text_voice_umos_async(self, umo: str) -> None:
+        """
+        从文字+语音同显列表移除 UMO（异步）。
+        
+        Args:
+            umo: 统一消息来源标识
+        """
+        umos = self.get_text_voice_umos()
+        if umo in umos:
+            umos.remove(umo)
+            await self.set_async("text_voice_umos", umos, save=True)
             
     # ==================== 配置修改 ====================
     

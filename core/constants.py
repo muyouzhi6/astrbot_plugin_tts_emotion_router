@@ -120,8 +120,9 @@ EMOTION_PREFERENCE_MAP: Dict[str, str] = {
 
 CONFIG_MIGRATE_KEYS: List[str] = [
     "global_enable",
-    "enabled_sessions",
-    "disabled_sessions",
+    "enabled_umos",        # 白名单 UMO 列表（替代原 enabled_sessions）
+    "disabled_umos",       # 黑名单 UMO 列表（替代原 disabled_sessions）
+    "text_voice_umos",     # 文字+语音同显 UMO 列表（新增）
     "prob",
     "text_limit",
     "cooldown",
@@ -131,7 +132,7 @@ CONFIG_MIGRATE_KEYS: List[str] = [
     "emotion",
     "speed_map",
 ]
-"""配置迁移时需要拷贝的字段白名单"""
+"""配置迁移时需要拷贝的字段白名单（UMO = 统一消息来源）"""
 
 
 # ==================== 音频相关常量 ====================

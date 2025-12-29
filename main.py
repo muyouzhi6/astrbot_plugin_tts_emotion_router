@@ -133,8 +133,12 @@ class TTSEmotionRouter(Star, CommandHandlers):
         self.voice_map: Dict[str, str] = self.config.get_voice_map()
         self.speed_map: Dict[str, float] = self.config.get_speed_map()
         self.global_enable: bool = self.config.get_global_enable()
-        self.enabled_sessions: List[str] = self.config.get_enabled_sessions()
-        self.disabled_sessions: List[str] = self.config.get_disabled_sessions()
+        # 使用 UMO（统一消息来源）替代原来的 session_id
+        self.enabled_umos: List[str] = self.config.get_enabled_umos()
+        self.disabled_umos: List[str] = self.config.get_disabled_umos()
+        # 保留旧属性名用于兼容，指向新属性
+        self.enabled_sessions: List[str] = self.enabled_umos
+        self.disabled_sessions: List[str] = self.disabled_umos
         self.prob: float = self.config.get_prob()
         self.text_limit: int = self.config.get_text_limit()
         self.cooldown: int = self.config.get_cooldown()
@@ -224,22 +228,43 @@ class TTSEmotionRouter(Star, CommandHandlers):
         self.tts_processor.speed_map = self.speed_map
         
         self.global_enable = self.config.get_global_enable()
-        self.enabled_sessions = self.config.get_enabled_sessions()
-        self.disabled_sessions = self.config.get_disabled_sessions()
+        # 使用 UMO 替代 session
+        self.enabled_umos = self.config.get_enabled_umos()
+        self.disabled_umos = self.config.get_disabled_umos()
+        # 保留旧属性名用于兼容
+        self.enabled_sessions = self.enabled_umos
+        self.disabled_sessions = self.disabled_umos
         self.show_references = self.config.get_show_references()
 
         self.emo_marker_enable = self.config.is_marker_enabled()
         self.marker_processor.update_config(self.config.get_marker_tag(), self.emo_marker_enable)
     
-    # ==================== 会话管理 ====================
+    # ==================== 会话管理（UMO 版本） ====================
     
-    def _sess_id(self, event: AstrMessageEvent) -> str:
-        """获取会话 ID。"""
+    def _get_umo(self, event: AstrMessageEvent) -> str:
+        """
+        获取 UMO（统一消息来源）标识。
+        
+        UMO 是 AstrBot 的标准会话标识格式，可通过 /sid 命令查看。
+        
+        Args:
+            event: 消息事件对象
+            
+        Returns:
+            str: UMO 标识字符串
+        """
+        # 直接使用 AstrBot 的统一消息来源标识
+        umo = getattr(event, "unified_msg_origin", None)
+        if umo:
+            logging.info(f"TTSEmotionRouter._get_umo: unified_msg_origin={umo}")
+            return str(umo)
+        
+        # 回退方案：如果 unified_msg_origin 不存在，使用旧的拼接方式
         gid = ""
         try:
             gid = event.get_group_id()
         except Exception as e:
-            logging.debug(f"TTSEmotionRouter._sess_id: failed to get group_id: {e}")
+            logging.debug(f"TTSEmotionRouter._get_umo: failed to get group_id: {e}")
             gid = ""
         
         # 确保 gid 是真正有效的群组 ID（非空、非 None 字符串）
@@ -248,14 +273,32 @@ class TTSEmotionRouter(Star, CommandHandlers):
         else:
             sid = f"user_{event.get_sender_id()}"
         
-        logging.info(f"TTSEmotionRouter._sess_id: gid={gid!r}, sender={event.get_sender_id()}, result={sid}")
+        logging.info(f"TTSEmotionRouter._get_umo: fallback mode, gid={gid!r}, sender={event.get_sender_id()}, result={sid}")
         return sid
     
-    def _is_session_enabled(self, sid: str) -> bool:
-        """检查会话是否启用 TTS。"""
+    def _sess_id(self, event: AstrMessageEvent) -> str:
+        """获取会话 ID（已废弃，请使用 _get_umo）。"""
+        return self._get_umo(event)
+    
+    def _is_umo_enabled(self, umo: str) -> bool:
+        """
+        检查 UMO 是否启用 TTS。
+        
+        Args:
+            umo: 统一消息来源标识
+            
+        Returns:
+            bool: 如果启用返回 True
+        """
         if self.global_enable:
-            return sid not in self.disabled_sessions
-        return sid in self.enabled_sessions
+            # 黑名单模式：默认开启，在黑名单中则关闭
+            return umo not in self.disabled_umos
+        # 白名单模式：默认关闭，在白名单中则开启
+        return umo in self.enabled_umos
+    
+    def _is_session_enabled(self, sid: str) -> bool:
+        """检查会话是否启用 TTS（已废弃，请使用 _is_umo_enabled）。"""
+        return self._is_umo_enabled(sid)
 
     def _get_session_state(self, sid: str) -> SessionState:
         return self._session_state.setdefault(sid, SessionState())
@@ -525,11 +568,11 @@ class TTSEmotionRouter(Star, CommandHandlers):
             logging.warning(f"TTS: error checking response type: {e}")
             return
             
-        # 2. 会话开关检查
-        sid = self._sess_id(event)
-        logging.info(f"TTS check: sid={sid}, global_enable={self.global_enable}, enabled_count={len(self.enabled_sessions)}, disabled_count={len(self.disabled_sessions)}")
-        if not self._is_session_enabled(sid):
-            logging.info("TTS skip: session disabled (%s)", sid)
+        # 2. 会话开关检查（使用 UMO）
+        umo = self._get_umo(event)
+        logging.info(f"TTS check: umo={umo}, global_enable={self.global_enable}, enabled_count={len(self.enabled_umos)}, disabled_count={len(self.disabled_umos)}")
+        if not self._is_umo_enabled(umo):
+            logging.info("TTS skip: UMO disabled (%s)", umo)
             return
 
         # 3. 强制清理情绪标记
@@ -583,7 +626,7 @@ class TTSEmotionRouter(Star, CommandHandlers):
             return
 
         # 7. 条件检查 (Condition Checker)
-        st = self._get_session_state(sid)
+        st = self._get_session_state(umo)
         
         # 混合内容检查：允许 Plain, At, Reply, Image, Face 等组件
         # 使用类名字符串匹配，避免不同版本的导入问题
@@ -607,7 +650,7 @@ class TTSEmotionRouter(Star, CommandHandlers):
             return
 
         # 8. 防重检查
-        sig = f"{sid}:{hash(tts_text[:50])}"
+        sig = f"{umo}:{hash(tts_text[:50])}"
         if sig in self._inflight_sigs:
             logging.info("TTS skip: duplicate request in flight")
             return
@@ -623,9 +666,18 @@ class TTSEmotionRouter(Star, CommandHandlers):
                 # 10. 构建结果 (Result Builder)
                 norm_path = self.tts_processor.normalize_audio_path(proc_res.audio_path)
                 
-                # 检查会话级文字语音同显配置
+                # 检查 UMO 级别的文字+语音同显配置
+                # 优先级: 会话状态 > UMO 配置 > 全局默认
                 session_text_voice = st.text_voice_enabled
-                effective_text_voice = session_text_voice if session_text_voice is not None else self.config.get_text_voice_default()
+                if session_text_voice is not None:
+                    # 会话状态有明确设置，优先使用
+                    effective_text_voice = session_text_voice
+                elif self.config.is_text_voice_enabled_for_umo(umo):
+                    # UMO 在文字+语音同显列表中
+                    effective_text_voice = True
+                else:
+                    # 使用全局默认值
+                    effective_text_voice = self.config.get_text_voice_default()
                 
                 result.chain = self.result_builder.build(
                     original_chain=result.chain,
