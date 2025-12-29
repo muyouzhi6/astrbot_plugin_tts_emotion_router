@@ -24,6 +24,7 @@ from .core.compat import (
     import_astrbot_config,
     import_llm_response,
     import_result_content_type,
+    import_message_chain,
 )
 
 # 获取兼容的类和模块
@@ -34,6 +35,7 @@ Context, Star, register = import_context_and_star()
 AstrBotConfig = import_astrbot_config()
 LLMResponse = import_llm_response()
 ResultContentType = import_result_content_type()
+MessageChain = import_message_chain()
 
 # 导入核心模块
 from .core.constants import (
@@ -591,6 +593,33 @@ class TTSEmotionRouter(Star, CommandHandlers):
         except Exception as e:
             logging.warning(f"TTSEmotionRouter: failed to strip markers: {e}")
 
+        # 3.5 提取并分离 Image 组件（兼容 meme_manager 等插件）
+        # Image 组件将被单独发送，不影响 TTS 生成
+        image_components = []
+        non_image_chain = []
+        for comp in result.chain:
+            c_type = type(comp).__name__
+            if c_type == "Image":
+                image_components.append(comp)
+            else:
+                non_image_chain.append(comp)
+        
+        # 如果有 Image 组件，先单独发送
+        if image_components:
+            logging.info(f"TTS: detected {len(image_components)} Image component(s), sending separately")
+            try:
+                # 使用 event.send() 单独发送图片
+                for img_comp in image_components:
+                    await event.send(MessageChain(chain=[img_comp]))
+                    logging.info("TTS: Image component sent successfully")
+            except Exception as e:
+                logging.warning(f"TTS: failed to send Image component separately: {e}")
+                # 如果发送失败，将图片放回结果链
+                non_image_chain.extend(image_components)
+        
+        # 更新 result.chain 为不含 Image 的链
+        result.chain = non_image_chain
+
         # 4. 提取纯文本
         text_parts = [
             c.text.strip()
@@ -598,6 +627,9 @@ class TTSEmotionRouter(Star, CommandHandlers):
             if isinstance(c, Plain) and c.text.strip()
         ]
         if not text_parts:
+            # 如果已经发送了图片但没有文本，清空结果链
+            if image_components:
+                result.chain = []
             return
         text = " ".join(text_parts)
         
@@ -628,9 +660,10 @@ class TTSEmotionRouter(Star, CommandHandlers):
         # 7. 条件检查 (Condition Checker)
         st = self._get_session_state(umo)
         
-        # 混合内容检查：允许 Plain, At, Reply, Image, Face 等组件
+        # 混合内容检查：允许 Plain, At, Reply, Face 等组件
+        # 注意：Image 已被提取并单独发送，所以这里不再需要包含 Image
         # 使用类名字符串匹配，避免不同版本的导入问题
-        ALLOWED_COMPONENTS = {"Plain", "At", "Reply", "Image", "Face"}
+        ALLOWED_COMPONENTS = {"Plain", "At", "Reply", "Face"}
         has_non_plain = False
         non_plain_types = []
         for c in result.chain:

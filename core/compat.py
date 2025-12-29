@@ -232,6 +232,17 @@ def import_result_content_type() -> Any:
     return ResultContentType
 
 
+def import_message_chain() -> Any:
+    """
+    导入 MessageChain 类。
+    
+    Returns:
+        MessageChain 类
+    """
+    from astrbot.core.message.message_event_result import MessageChain
+    return MessageChain
+
+
 # ==================== 初始化执行 ====================
 
 def initialize_compat() -> None:
