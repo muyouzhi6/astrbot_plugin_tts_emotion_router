@@ -1,6 +1,6 @@
 name: astrbot_plugin_tts_emotion_router
 author: 木有知
-version: 1.1.1
+version: 1.1.2
 desc: "按情绪路由到不同音色与语速的 TTS 插件（硅基流动 API，其他OpenAI语音接口api同样适配），支持隐藏标记与启发式情绪识别、概率/长度/冷却门控与会话开关。"
 repo: https://github.com/muyouzhi6/astrbot_plugin_tts_emotion_router
 entry: main.py
@@ -11,6 +11,7 @@ tags:
   - emotion
   - router
   - plugin
+
 
 
 
