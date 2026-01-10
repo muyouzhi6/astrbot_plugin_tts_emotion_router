@@ -377,11 +377,13 @@ class CodeAndLinkExtractor:
                     matches_found = True
                     seen_links.add(link)
                     extracted_links.append(link)
+                    # clean_text 保留原始链接，speak_text 替换为占位符
+                    clean_text_parts.append(link)
                     speak_text_parts.append(" 链接 ")
                 else:
-                    # 重复链接，静默跳过
-                    pass
-                    
+                    # 重复链接，保留原文但不重复提取
+                    clean_text_parts.append(matched_content)
+
             elif group_name == 'BARE':
                 # 裸域名
                 if self._is_valid_bare_domain(matched_content):
@@ -390,10 +392,12 @@ class CodeAndLinkExtractor:
                         matches_found = True
                         seen_links.add(link)
                         extracted_links.append(link)
+                        # clean_text 保留原始链接，speak_text 替换为占位符
+                        clean_text_parts.append(link)
                         speak_text_parts.append(" 链接 ")
                     else:
-                        # 重复链接，静默跳过
-                        pass
+                        # 重复链接，保留原文
+                        clean_text_parts.append(matched_content)
                 else:
                     # 不是有效域名，保留原样
                     clean_text_parts.append(matched_content)
