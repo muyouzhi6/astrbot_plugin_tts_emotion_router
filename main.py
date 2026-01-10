@@ -698,7 +698,7 @@ class TTSEmotionRouter(Star, CommandHandlers):
             if proc_res.success and proc_res.audio_path:
                 # 10. 构建结果 (Result Builder)
                 norm_path = self.tts_processor.normalize_audio_path(proc_res.audio_path)
-                
+
                 # 检查 UMO 级别的文字+语音同显配置
                 # 优先级: 会话状态 > UMO 配置 > 全局默认
                 session_text_voice = st.text_voice_enabled
@@ -711,13 +711,29 @@ class TTSEmotionRouter(Star, CommandHandlers):
                 else:
                     # 使用全局默认值
                     effective_text_voice = self.config.get_text_voice_default()
-                
-                result.chain = self.result_builder.build(
-                    original_chain=result.chain,
-                    audio_path=norm_path,
-                    send_text=send_text,
-                    text_voice_enabled=effective_text_voice
-                )
+
+                # 如果有链接或代码，强制发送文本（方便用户复制）
+                # 只发送链接和代码，不重复发送整段文字
+                if links or codes:
+                    ref_parts = []
+                    if links:
+                        ref_parts.extend(links)
+                    if codes:
+                        ref_parts.extend(codes)
+                    ref_text = "\n".join(ref_parts)
+                    result.chain = self.result_builder.build(
+                        original_chain=result.chain,
+                        audio_path=norm_path,
+                        send_text=ref_text,
+                        text_voice_enabled=True
+                    )
+                else:
+                    result.chain = self.result_builder.build(
+                        original_chain=result.chain,
+                        audio_path=norm_path,
+                        send_text=send_text,
+                        text_voice_enabled=effective_text_voice
+                    )
                 
                 logging.info(f"TTS: success, audio={norm_path}")
                 
