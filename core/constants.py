@@ -208,3 +208,6 @@ DEFAULT_TEST_TEXT: str = "你好，这是一个TTS测试"
 
 HISTORY_WRITE_DELAY: float = 0.8
 """历史记录写入延迟（秒）"""
+
+DEFAULT_SEGMENTED_MIN_SEGMENT_LENGTH: int = 5
+"""分段TTS每个分段的最少字符数（低于此值会与相邻分段合并）"""

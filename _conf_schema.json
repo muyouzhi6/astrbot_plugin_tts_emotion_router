@@ -167,6 +167,12 @@
         "type": "string",
         "hint": "按此正则匹配的位置进行分段",
         "default": "[。？！?!\\n…]+"
+      },
+      "min_segment_length": {
+        "description": "每个分段的最少字符数",
+        "type": "int",
+        "hint": "低于此值的分段会与相邻分段合并，避免拟声词（如'咦！'）单独成段导致语音过短",
+        "default": 5
       }
     }
   }

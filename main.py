@@ -262,7 +262,7 @@ class TTSEmotionRouter(Star, CommandHandlers):
             split_pattern=self.config.get_segmented_tts_split_pattern(),
             smart_mode=True,
             max_segments=self.config.get_segmented_tts_max_segments(),
-            min_segment_length=2,
+            min_segment_length=self.config.get_segmented_tts_min_segment_length(),
         )
         
         # 创建分段 TTS 处理器

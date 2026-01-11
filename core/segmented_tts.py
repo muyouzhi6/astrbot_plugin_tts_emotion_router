@@ -123,6 +123,7 @@ class SegmentedTTSProcessor:
         fixed_interval: float = 1.5,
         adaptive_buffer: float = 0.5,
         max_segments: int = 10,
+        min_segment_length: int = 5,
     ):
         """
         初始化分段 TTS 处理器。
@@ -134,9 +135,13 @@ class SegmentedTTSProcessor:
             fixed_interval: 固定间隔时间（秒）
             adaptive_buffer: 自适应模式下的额外缓冲时间（秒）
             max_segments: 最大分段数量
+            min_segment_length: 每个分段的最少字符数（低于此值会与相邻分段合并）
         """
         self.tts_processor = tts_processor
-        self.splitter = splitter or TextSplitter(max_segments=max_segments)
+        self.splitter = splitter or TextSplitter(
+            max_segments=max_segments,
+            min_segment_length=min_segment_length,
+        )
         self.interval_mode = interval_mode
         self.fixed_interval = fixed_interval
         self.adaptive_buffer = adaptive_buffer

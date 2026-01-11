@@ -28,6 +28,7 @@ from .constants import (
     DEFAULT_COOLDOWN,
     DEFAULT_EMO_MARKER_TAG,
     DEFAULT_EMOTION_KEYWORDS_LIST,
+    DEFAULT_SEGMENTED_MIN_SEGMENT_LENGTH,
 )
 
 logger = logging.getLogger(__name__)
@@ -745,6 +746,19 @@ class ConfigManager:
         """
         cfg = self.get_segmented_tts_config()
         return str(cfg.get("split_pattern", r"[。？！?!\n…]+"))
+    
+    def get_segmented_tts_min_segment_length(self) -> int:
+        """
+        获取每个分段的最少字符数。
+        
+        低于此值的分段会与相邻分段合并，避免拟声词（如"咦！"）
+        单独成段导致语音过短听不清。
+        
+        Returns:
+            最少字符数，默认 5
+        """
+        cfg = self.get_segmented_tts_config()
+        return int(cfg.get("min_segment_length", DEFAULT_SEGMENTED_MIN_SEGMENT_LENGTH))
     
     def set_segmented_tts_enabled(self, enable: bool) -> None:
         """设置分段 TTS 启用状态（同步）。"""
