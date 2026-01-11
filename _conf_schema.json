@@ -114,5 +114,54 @@
       "preview_limit": { "description": "单段代码最大展示字符(0=不截断)", "type": "int", "default": 0 },
       "max_total_chars": { "description": "参考文献总字符上限(0=不限制)", "type": "int", "default": 0 }
     }
+  },
+  "segmented_tts": {
+    "description": "分段语音回复设置",
+    "type": "object",
+    "items": {
+      "enable": {
+        "description": "启用分段语音",
+        "type": "bool",
+        "hint": "开启后，长文本会被分成多条语音依次发送",
+        "default": false
+      },
+      "interval_mode": {
+        "description": "分段间隔模式",
+        "type": "string",
+        "options": ["fixed", "adaptive"],
+        "hint": "fixed=固定间隔; adaptive=根据上一条语音时长自适应(模拟录语音效果)",
+        "default": "fixed"
+      },
+      "fixed_interval": {
+        "description": "固定间隔时间（秒）",
+        "type": "float",
+        "hint": "仅在 interval_mode=fixed 时生效",
+        "default": 1.5
+      },
+      "adaptive_buffer": {
+        "description": "自适应模式缓冲时间（秒）",
+        "type": "float",
+        "hint": "自适应模式下，等待时间=音频时长+缓冲时间",
+        "default": 0.5
+      },
+      "max_segments": {
+        "description": "最大分段数量",
+        "type": "int",
+        "hint": "超过此数量的段落会被合并到最后一段",
+        "default": 10
+      },
+      "min_segment_chars": {
+        "description": "触发分段的最小字符数",
+        "type": "int",
+        "hint": "文本长度小于此值时不会分段",
+        "default": 50
+      },
+      "split_pattern": {
+        "description": "分段正则表达式",
+        "type": "string",
+        "hint": "按此正则匹配的位置进行分段",
+        "default": "[。？！?!\\n…]+"
+      }
+    }
   }
 }

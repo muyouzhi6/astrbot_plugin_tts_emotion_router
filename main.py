@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
+from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 # 初始化兼容性处理（必须在其他 astrbot 导入之前）
@@ -58,6 +59,8 @@ from .core.session import SessionState
 from .core.config import ConfigManager
 from .core.marker import EmotionMarkerProcessor
 from .core.tts_processor import TTSProcessor, TTSConditionChecker, TTSResultBuilder
+from .core.segmented_tts import SegmentedTTSProcessor, get_audio_duration, INTERVAL_MODE_FIXED, INTERVAL_MODE_ADAPTIVE
+from .core.text_splitter import TextSplitter
 
 # 导入命令处理器
 from .commands.handlers import CommandHandlers
@@ -193,6 +196,9 @@ class TTSEmotionRouter(Star, CommandHandlers):
         
         self.result_builder = TTSResultBuilder(Plain, Record)
 
+        # 6. 分段 TTS 处理器
+        self._init_segmented_tts()
+
         # 保留旧属性以保持兼容性 (部分命令处理器可能用到)
         self.tts = self.tts_client # 兼容旧代码引用 self.tts
         self.emo_marker_tag = marker_tag
@@ -240,6 +246,37 @@ class TTSEmotionRouter(Star, CommandHandlers):
 
         self.emo_marker_enable = self.config.is_marker_enabled()
         self.marker_processor.update_config(self.config.get_marker_tag(), self.emo_marker_enable)
+        
+        # 更新分段 TTS 处理器
+        self._init_segmented_tts()
+    
+    def _init_segmented_tts(self) -> None:
+        """初始化分段 TTS 处理器。"""
+        # 获取分段配置
+        seg_cfg = self.config.get_segmented_tts_config()
+        
+        # 创建文本分段器
+        self.text_splitter = TextSplitter(
+            split_pattern=self.config.get_segmented_tts_split_pattern(),
+            smart_mode=True,
+            max_segments=self.config.get_segmented_tts_max_segments(),
+            min_segment_length=2,
+        )
+        
+        # 创建分段 TTS 处理器
+        interval_mode = self.config.get_segmented_tts_interval_mode()
+        self.segmented_tts_processor = SegmentedTTSProcessor(
+            tts_processor=self.tts_processor,
+            splitter=self.text_splitter,
+            interval_mode=interval_mode,
+            fixed_interval=self.config.get_segmented_tts_fixed_interval(),
+            adaptive_buffer=self.config.get_segmented_tts_adaptive_buffer(),
+            max_segments=self.config.get_segmented_tts_max_segments(),
+        )
+        
+        # 缓存配置
+        self.segmented_tts_enabled = self.config.is_segmented_tts_enabled()
+        self.segmented_tts_min_chars = self.config.get_segmented_tts_min_segment_chars()
     
     # ==================== 会话管理（UMO 版本） ====================
     
@@ -690,60 +727,108 @@ class TTSEmotionRouter(Star, CommandHandlers):
         self._inflight_sigs.add(sig)
 
         try:
-            # 9. 执行 TTS 处理 (Core Processor)
-            logging.info(f"TTS: starting TTS processing for text: {tts_text[:50]}...")
-            proc_res = await self.tts_processor.process(tts_text, st)
-            logging.info(f"TTS: process result: success={proc_res.success}, audio_path={proc_res.audio_path}, error={proc_res.error}")
+            # 9. 判断是否使用分段 TTS
+            use_segmented = (
+                self.segmented_tts_enabled 
+                and self.segmented_tts_processor.should_use_segmented(tts_text, self.segmented_tts_min_chars)
+            )
             
-            if proc_res.success and proc_res.audio_path:
-                # 10. 构建结果 (Result Builder)
-                norm_path = self.tts_processor.normalize_audio_path(proc_res.audio_path)
-
-                # 检查 UMO 级别的文字+语音同显配置
-                # 优先级: 会话状态 > UMO 配置 > 全局默认
-                session_text_voice = st.text_voice_enabled
-                if session_text_voice is not None:
-                    # 会话状态有明确设置，优先使用
-                    effective_text_voice = session_text_voice
-                elif self.config.is_text_voice_enabled_for_umo(umo):
-                    # UMO 在文字+语音同显列表中
-                    effective_text_voice = True
-                else:
-                    # 使用全局默认值
-                    effective_text_voice = self.config.get_text_voice_default()
-
-                # 如果有链接或代码，强制发送文本（方便用户复制）
-                # 只发送链接和代码，不重复发送整段文字
-                if links or codes:
-                    ref_parts = []
-                    if links:
-                        ref_parts.extend(links)
-                    if codes:
-                        ref_parts.extend(codes)
-                    ref_text = "\n".join(ref_parts)
-                    result.chain = self.result_builder.build(
-                        original_chain=result.chain,
-                        audio_path=norm_path,
-                        send_text=ref_text,
-                        text_voice_enabled=True
-                    )
-                else:
-                    result.chain = self.result_builder.build(
-                        original_chain=result.chain,
-                        audio_path=norm_path,
-                        send_text=send_text,
-                        text_voice_enabled=effective_text_voice
-                    )
+            if use_segmented:
+                # 使用分段 TTS 处理
+                logging.info(f"TTS: using segmented mode for text: {tts_text[:50]}...")
                 
-                logging.info(f"TTS: success, audio={norm_path}")
+                # 定义发送函数
+                async def send_audio(audio_path: Path) -> bool:
+                    try:
+                        await event.send(MessageChain(chain=[Record(file=str(audio_path))]))
+                        return True
+                    except Exception as e:
+                        logging.error(f"TTS: failed to send audio segment: {e}")
+                        return False
                 
-                # 缓存文本用于历史记录
-                if send_text.strip():
-                    st.set_assistant_text(send_text.strip())
-            else:
-                # 失败则回退到纯文本
-                logging.error(f"TTS failed: {proc_res.error}")
-                result.chain = [Plain(text=send_text)]
+                # 执行分段处理并发送
+                seg_result = await self.segmented_tts_processor.process_and_send(
+                    tts_text, st, send_audio
+                )
+                
+                if seg_result.success:
+                    logging.info(f"TTS: segmented mode success, sent {len(seg_result.successful_segments)} segment(s)")
+                    # 分段模式下，所有语音已发送，清空结果链
+                    # 如果有链接或代码，发送参考文献
+                    if links or codes:
+                        ref_parts = []
+                        if links:
+                            ref_parts.extend(links)
+                        if codes:
+                            ref_parts.extend(codes)
+                        ref_text = "\n".join(ref_parts)
+                        result.chain = [Plain(text=ref_text)]
+                    else:
+                        result.chain = []
+                    
+                    # 缓存文本用于历史记录
+                    if send_text.strip():
+                        st.set_assistant_text(send_text.strip())
+                else:
+                    # 分段失败，回退到普通模式
+                    logging.warning(f"TTS: segmented mode failed ({seg_result.error}), falling back to normal mode")
+                    use_segmented = False
+            
+            if not use_segmented:
+                # 10. 执行普通 TTS 处理 (Core Processor)
+                logging.info(f"TTS: starting TTS processing for text: {tts_text[:50]}...")
+                proc_res = await self.tts_processor.process(tts_text, st)
+                logging.info(f"TTS: process result: success={proc_res.success}, audio_path={proc_res.audio_path}, error={proc_res.error}")
+            
+                if proc_res.success and proc_res.audio_path:
+                    # 11. 构建结果 (Result Builder)
+                    norm_path = self.tts_processor.normalize_audio_path(proc_res.audio_path)
+
+                    # 检查 UMO 级别的文字+语音同显配置
+                    # 优先级: 会话状态 > UMO 配置 > 全局默认
+                    session_text_voice = st.text_voice_enabled
+                    if session_text_voice is not None:
+                        # 会话状态有明确设置，优先使用
+                        effective_text_voice = session_text_voice
+                    elif self.config.is_text_voice_enabled_for_umo(umo):
+                        # UMO 在文字+语音同显列表中
+                        effective_text_voice = True
+                    else:
+                        # 使用全局默认值
+                        effective_text_voice = self.config.get_text_voice_default()
+
+                    # 如果有链接或代码，强制发送文本（方便用户复制）
+                    # 只发送链接和代码，不重复发送整段文字
+                    if links or codes:
+                        ref_parts = []
+                        if links:
+                            ref_parts.extend(links)
+                        if codes:
+                            ref_parts.extend(codes)
+                        ref_text = "\n".join(ref_parts)
+                        result.chain = self.result_builder.build(
+                            original_chain=result.chain,
+                            audio_path=norm_path,
+                            send_text=ref_text,
+                            text_voice_enabled=True
+                        )
+                    else:
+                        result.chain = self.result_builder.build(
+                            original_chain=result.chain,
+                            audio_path=norm_path,
+                            send_text=send_text,
+                            text_voice_enabled=effective_text_voice
+                        )
+                    
+                    logging.info(f"TTS: success, audio={norm_path}")
+                    
+                    # 缓存文本用于历史记录
+                    if send_text.strip():
+                        st.set_assistant_text(send_text.strip())
+                else:
+                    # 失败则回退到纯文本
+                    logging.error(f"TTS failed: {proc_res.error}")
+                    result.chain = [Plain(text=send_text)]
 
         finally:
             self._inflight_sigs.discard(sig)
@@ -959,4 +1044,31 @@ class TTSEmotionRouter(Star, CommandHandlers):
     @filter.command("tts_refs_off", priority=1)
     async def tts_refs_off(self, event: AstrMessageEvent):
         result = await self.cmd_tts_refs_off(event)
+        yield event.plain_result(result)
+    
+    # ==================== 分段 TTS 命令 ====================
+    
+    @filter.command("tts_segment_on", priority=1)
+    async def tts_segment_on(self, event: AstrMessageEvent):
+        result = await self.cmd_tts_segment_on(event)
+        yield event.plain_result(result)
+    
+    @filter.command("tts_segment_off", priority=1)
+    async def tts_segment_off(self, event: AstrMessageEvent):
+        result = await self.cmd_tts_segment_off(event)
+        yield event.plain_result(result)
+    
+    @filter.command("tts_segment_mode", priority=1)
+    async def tts_segment_mode(self, event: AstrMessageEvent, *, mode: Optional[str] = None):
+        result = await self.cmd_tts_segment_mode(event, mode)
+        yield event.plain_result(result)
+    
+    @filter.command("tts_segment_interval", priority=1)
+    async def tts_segment_interval(self, event: AstrMessageEvent, *, value: Optional[str] = None):
+        result = await self.cmd_tts_segment_interval(event, value)
+        yield event.plain_result(result)
+    
+    @filter.command("tts_segment_status", priority=1)
+    async def tts_segment_status(self, event: AstrMessageEvent):
+        result = await self.cmd_tts_segment_status(event)
         yield event.plain_result(result)

@@ -512,3 +512,108 @@ class CommandHandlers:
         """创建新的会话状态（由主类实现）。"""
         from ..core.session import SessionState
         return SessionState()
+    
+    # ==================== 分段 TTS 命令 ====================
+    
+    async def cmd_tts_segment_on(self, event) -> str:
+        """开启分段语音回复。"""
+        try:
+            self.segmented_tts_enabled = True  # type: ignore
+            await self.config.set_segmented_tts_enabled_async(True)  # type: ignore
+            return "分段语音回复：开启（长文本将分成多条语音发送）"
+        except Exception as e:
+            logger.error(f"cmd_tts_segment_on failed: {e}", exc_info=True)
+            return f"错误: {e}"
+    
+    async def cmd_tts_segment_off(self, event) -> str:
+        """关闭分段语音回复。"""
+        try:
+            self.segmented_tts_enabled = False  # type: ignore
+            await self.config.set_segmented_tts_enabled_async(False)  # type: ignore
+            return "分段语音回复：关闭（长文本将合成一条语音）"
+        except Exception as e:
+            logger.error(f"cmd_tts_segment_off failed: {e}", exc_info=True)
+            return f"错误: {e}"
+    
+    async def cmd_tts_segment_mode(self, event, mode: Optional[str] = None) -> str:
+        """
+        设置分段间隔模式。
+        
+        mode: fixed（固定间隔）或 adaptive（自适应）
+        """
+        try:
+            if mode is None:
+                # 显示当前模式
+                current = self.config.get_segmented_tts_interval_mode()  # type: ignore
+                return f"当前分段间隔模式: {current}\n用法: tts_segment_mode <fixed|adaptive>"
+            
+            mode = mode.strip().lower()
+            if mode not in ("fixed", "adaptive"):
+                return "用法: tts_segment_mode <fixed|adaptive>\nfixed=固定间隔, adaptive=根据音频时长自适应"
+            
+            await self.config.set_segmented_tts_interval_mode_async(mode)  # type: ignore
+            # 更新处理器
+            self._init_segmented_tts()  # type: ignore
+            
+            if mode == "fixed":
+                interval = self.config.get_segmented_tts_fixed_interval()  # type: ignore
+                return f"分段间隔模式: fixed（固定 {interval} 秒）"
+            else:
+                buffer = self.config.get_segmented_tts_adaptive_buffer()  # type: ignore
+                return f"分段间隔模式: adaptive（音频时长 + {buffer} 秒缓冲）"
+        except Exception as e:
+            logger.error(f"cmd_tts_segment_mode failed: {e}", exc_info=True)
+            return f"错误: {e}"
+    
+    async def cmd_tts_segment_interval(self, event, value: Optional[str] = None) -> str:
+        """设置固定间隔时间（秒）。"""
+        try:
+            if value is None:
+                current = self.config.get_segmented_tts_fixed_interval()  # type: ignore
+                return f"当前固定间隔: {current} 秒\n用法: tts_segment_interval <秒数>"
+            
+            v = float(value)
+            if v < 0.5:
+                return "间隔时间不能小于 0.5 秒"
+            if v > 30:
+                return "间隔时间不能超过 30 秒"
+            
+            await self.config.set_segmented_tts_fixed_interval_async(v)  # type: ignore
+            # 更新处理器
+            self._init_segmented_tts()  # type: ignore
+            return f"固定间隔已设为 {v} 秒"
+        except ValueError:
+            return "用法: tts_segment_interval <秒数>，如 1.5"
+        except Exception as e:
+            logger.error(f"cmd_tts_segment_interval failed: {e}", exc_info=True)
+            return f"错误: {e}"
+    
+    async def cmd_tts_segment_status(self, event) -> str:
+        """查询分段 TTS 状态。"""
+        try:
+            enabled = self.config.is_segmented_tts_enabled()  # type: ignore
+            mode = self.config.get_segmented_tts_interval_mode()  # type: ignore
+            fixed_interval = self.config.get_segmented_tts_fixed_interval()  # type: ignore
+            adaptive_buffer = self.config.get_segmented_tts_adaptive_buffer()  # type: ignore
+            max_segments = self.config.get_segmented_tts_max_segments()  # type: ignore
+            min_chars = self.config.get_segmented_tts_min_segment_chars()  # type: ignore
+            
+            status = "开启" if enabled else "关闭"
+            mode_desc = "固定间隔" if mode == "fixed" else "自适应"
+            
+            return f"""分段语音回复状态:
+状态: {status}
+间隔模式: {mode_desc}
+固定间隔: {fixed_interval} 秒
+自适应缓冲: {adaptive_buffer} 秒
+最大分段数: {max_segments}
+最小触发字数: {min_chars}
+
+命令:
+- tts_segment_on: 开启分段
+- tts_segment_off: 关闭分段
+- tts_segment_mode <fixed|adaptive>: 设置间隔模式
+- tts_segment_interval <秒数>: 设置固定间隔"""
+        except Exception as e:
+            logger.error(f"cmd_tts_segment_status failed: {e}", exc_info=True)
+            return f"错误: {e}"

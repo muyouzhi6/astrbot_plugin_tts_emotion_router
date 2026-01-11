@@ -660,3 +660,117 @@ class ConfigManager:
     def get_text_voice_default(self) -> bool:
         """获取文字+语音同时输出的默认值。"""
         return bool(self.get("text_voice_default", False))
+    
+    # ==================== 分段 TTS 配置 ====================
+    
+    def get_segmented_tts_config(self) -> Dict[str, Any]:
+        """获取分段 TTS 配置。"""
+        return self.get("segmented_tts", {}) or {}
+    
+    def is_segmented_tts_enabled(self) -> bool:
+        """检查是否启用分段 TTS。"""
+        cfg = self.get_segmented_tts_config()
+        return bool(cfg.get("enable", False))
+    
+    def get_segmented_tts_interval_mode(self) -> str:
+        """
+        获取分段间隔模式。
+        
+        Returns:
+            "fixed" 或 "adaptive"
+        """
+        cfg = self.get_segmented_tts_config()
+        mode = cfg.get("interval_mode", "fixed")
+        if mode not in ("fixed", "adaptive"):
+            return "fixed"
+        return mode
+    
+    def get_segmented_tts_fixed_interval(self) -> float:
+        """
+        获取固定间隔时间（秒）。
+        
+        Returns:
+            固定间隔时间，默认 1.5 秒
+        """
+        cfg = self.get_segmented_tts_config()
+        return float(cfg.get("fixed_interval", 1.5))
+    
+    def get_segmented_tts_adaptive_buffer(self) -> float:
+        """
+        获取自适应模式下的缓冲时间（秒）。
+        
+        Returns:
+            缓冲时间，默认 0.5 秒
+        """
+        cfg = self.get_segmented_tts_config()
+        return float(cfg.get("adaptive_buffer", 0.5))
+    
+    def get_segmented_tts_max_segments(self) -> int:
+        """
+        获取最大分段数量。
+        
+        Returns:
+            最大分段数，默认 10
+        """
+        cfg = self.get_segmented_tts_config()
+        return int(cfg.get("max_segments", 10))
+    
+    def get_segmented_tts_min_segment_chars(self) -> int:
+        """
+        获取触发分段的最小字符数。
+        
+        Returns:
+            最小字符数，默认 50
+        """
+        cfg = self.get_segmented_tts_config()
+        return int(cfg.get("min_segment_chars", 50))
+    
+    def get_segmented_tts_split_pattern(self) -> str:
+        """
+        获取分段正则表达式。
+        
+        Returns:
+            分段正则，默认按句号、问号、感叹号、换行分割
+        """
+        cfg = self.get_segmented_tts_config()
+        return str(cfg.get("split_pattern", r"[。？！?!\n…]+"))
+    
+    def set_segmented_tts_enabled(self, enable: bool) -> None:
+        """设置分段 TTS 启用状态（同步）。"""
+        cfg = self.get_segmented_tts_config()
+        cfg["enable"] = enable
+        self.set("segmented_tts", cfg, save=True)
+    
+    async def set_segmented_tts_enabled_async(self, enable: bool) -> None:
+        """设置分段 TTS 启用状态（异步）。"""
+        cfg = self.get_segmented_tts_config()
+        cfg["enable"] = enable
+        await self.set_async("segmented_tts", cfg, save=True)
+    
+    def set_segmented_tts_interval_mode(self, mode: str) -> None:
+        """设置分段间隔模式（同步）。"""
+        if mode not in ("fixed", "adaptive"):
+            mode = "fixed"
+        cfg = self.get_segmented_tts_config()
+        cfg["interval_mode"] = mode
+        self.set("segmented_tts", cfg, save=True)
+    
+    async def set_segmented_tts_interval_mode_async(self, mode: str) -> None:
+        """设置分段间隔模式（异步）。"""
+        if mode not in ("fixed", "adaptive"):
+            mode = "fixed"
+        cfg = self.get_segmented_tts_config()
+        cfg["interval_mode"] = mode
+        await self.set_async("segmented_tts", cfg, save=True)
+    
+    def set_segmented_tts_fixed_interval(self, interval: float) -> None:
+        """设置固定间隔时间（同步）。"""
+        cfg = self.get_segmented_tts_config()
+        cfg["fixed_interval"] = max(0.5, float(interval))
+        self.set("segmented_tts", cfg, save=True)
+    
+    async def set_segmented_tts_fixed_interval_async(self, interval: float) -> None:
+        """设置固定间隔时间（异步）。"""
+        cfg = self.get_segmented_tts_config()
+        cfg["fixed_interval"] = max(0.5, float(interval))
+        await self.set_async("segmented_tts", cfg, save=True)
