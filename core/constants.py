@@ -171,7 +171,10 @@ DEFAULT_PROB: float = 0.8
 """默认 TTS 触发概率"""
 
 DEFAULT_TEXT_LIMIT: int = 80
-"""默认文本长度限制"""
+"""默认文本长度上限"""
+
+DEFAULT_TEXT_MIN_LIMIT: int = 5
+"""默认文本长度下限（低于此值不触发TTS）"""
 
 DEFAULT_COOLDOWN: int = 5
 """默认冷却时间（秒）"""

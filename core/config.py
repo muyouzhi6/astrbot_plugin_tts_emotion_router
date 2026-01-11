@@ -24,6 +24,7 @@ from .constants import (
     DEFAULT_SAMPLE_RATE_OTHER,
     DEFAULT_PROB,
     DEFAULT_TEXT_LIMIT,
+    DEFAULT_TEXT_MIN_LIMIT,
     DEFAULT_COOLDOWN,
     DEFAULT_EMO_MARKER_TAG,
     DEFAULT_EMOTION_KEYWORDS_LIST,
@@ -322,8 +323,12 @@ class ConfigManager:
         return float(self.get("prob", DEFAULT_PROB))
     
     def get_text_limit(self) -> int:
-        """获取文本长度限制。"""
+        """获取文本长度上限。"""
         return int(self.get("text_limit", DEFAULT_TEXT_LIMIT))
+    
+    def get_text_min_limit(self) -> int:
+        """获取文本长度下限（低于此值不触发TTS）。"""
+        return int(self.get("text_min_limit", DEFAULT_TEXT_MIN_LIMIT))
     
     def get_cooldown(self) -> int:
         """获取冷却时间。"""
@@ -614,6 +619,12 @@ class ConfigManager:
 
     async def set_text_limit_async(self, limit: int) -> None:
         await self.set_async("text_limit", limit, save=True)
+    
+    def set_text_min_limit(self, limit: int) -> None:
+        self.set("text_min_limit", limit, save=True)
+
+    async def set_text_min_limit_async(self, limit: int) -> None:
+        await self.set_async("text_min_limit", limit, save=True)
         
     def set_cooldown(self, cooldown: int) -> None:
         self.set("cooldown", cooldown, save=True)

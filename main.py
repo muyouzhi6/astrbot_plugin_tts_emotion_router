@@ -190,6 +190,7 @@ class TTSEmotionRouter(Star, CommandHandlers):
         self.condition_checker = TTSConditionChecker(
             prob=self.prob,
             text_limit=self.text_limit,
+            text_min_limit=self.config.get_text_min_limit(),
             cooldown=self.cooldown,
             allow_mixed=self.allow_mixed
         )
@@ -227,6 +228,7 @@ class TTSEmotionRouter(Star, CommandHandlers):
         # 更新组件状态
         self.condition_checker.prob = self.config.get_prob()
         self.condition_checker.text_limit = self.config.get_text_limit()
+        self.condition_checker.text_min_limit = self.config.get_text_min_limit()
         self.condition_checker.cooldown = self.config.get_cooldown()
         self.condition_checker.allow_mixed = self.config.get_allow_mixed()
         

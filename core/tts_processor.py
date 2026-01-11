@@ -61,6 +61,7 @@ class TTSConditionChecker:
         self,
         prob: float = 1.0,
         text_limit: int = 0,
+        text_min_limit: int = 0,
         cooldown: int = 0,
         allow_mixed: bool = False,
     ):
@@ -69,12 +70,14 @@ class TTSConditionChecker:
         
         Args:
             prob: TTS 触发概率
-            text_limit: 文本长度限制
+            text_limit: 文本长度上限
+            text_min_limit: 文本长度下限（低于此值不触发TTS）
             cooldown: 冷却时间
             allow_mixed: 是否允许混合内容
         """
         self.prob = prob
         self.text_limit = text_limit
+        self.text_min_limit = text_min_limit
         self.cooldown = cooldown
         self.allow_mixed = allow_mixed
     
@@ -104,16 +107,20 @@ class TTSConditionChecker:
             if not effective_mixed:
                 return TTSCheckResult(False, "mixed content not allowed")
         
-        # 2. 文本长度检查
+        # 2. 文本长度下限检查
+        if self.text_min_limit > 0 and len(text) < self.text_min_limit:
+            return TTSCheckResult(False, f"text too short ({len(text)} < {self.text_min_limit})")
+        
+        # 3. 文本长度上限检查
         if self.text_limit > 0 and len(text) > self.text_limit:
             return TTSCheckResult(False, f"text too long ({len(text)} > {self.text_limit})")
         
-        # 3. 冷却时间检查
+        # 4. 冷却时间检查
         is_cd_ok, remaining = self.check_cooldown(session_state.last_ts)
         if not is_cd_ok:
             return TTSCheckResult(False, f"cooldown ({remaining:.1f}s)", remaining)
             
-        # 4. 概率检查
+        # 5. 概率检查
         is_prob_ok, roll = self.check_probability()
         if not is_prob_ok:
             return TTSCheckResult(False, f"probability check failed ({roll:.2f} > {self.prob})")

@@ -38,6 +38,12 @@
     "hint": "超过将不触发TTS",
     "default": 200
   },
+  "text_min_limit": {
+    "description": "最小文本长度",
+    "type": "int",
+    "hint": "低于此值不触发TTS（如\"哦\"\"好吧\"等短回复）",
+    "default": 5
+  },
   "cooldown": {
     "description": "冷却时间（秒）",
     "type": "int",
