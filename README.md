@@ -39,8 +39,8 @@
 2. 安装 ffmpeg（系统仅需能调用 ffmpeg 命令）。  
 3. 拥有硅基流动（或兼容 OpenAI TTS 接口）的 API Key。  
 4. （可选）使用提供的音色上传工具压缩包导入自定义音色
-   方法1（推荐）：[voice.gbkgov.cn](https://voice.gbkgov.cn/)【特别鸣谢Chris的硅基音色一键上传网站】
-   方法2： [硅基音色一键上传.zip](https://github.com/user-attachments/files/22064355/default.zip)。
+   方法（推荐）：[voice.gbkgov.cn](https://voice.gbkgov.cn/)【特别鸣谢Chris的硅基音色一键上传网站】
+  
 6. 在插件配置里填写 api 信息与 voice_map / speed_map。
    
 6.**配置检验**
@@ -430,6 +430,7 @@ timeout: 15         # 缩短超时时间
 *让每一句话都充满感情！*
 
 </div>
+
 
 
 
