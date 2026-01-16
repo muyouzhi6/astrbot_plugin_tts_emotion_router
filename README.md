@@ -424,12 +424,18 @@ timeout: 15         # 缩短超时时间
 ---
 
 <div align="center">
+
+本插件开发QQ群：215532038
+
+<img width="1284" height="2289" alt="qrcode_1767584668806" src="https://github.com/user-attachments/assets/113ccf60-044a-47f3-ac8f-432ae05f89ee" />
+
   
 **🌟 如果这个插件对你有帮助，请给个 Star 支持一下！**
 
 *让每一句话都充满感情！*
 
 </div>
+
 
 
 
