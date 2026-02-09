@@ -35,7 +35,7 @@ class TextSplitter:
     """
     
     # 默认分段正则：句号、问号、感叹号、换行、省略号
-    DEFAULT_SPLIT_PATTERN = r"[。？！?!\n…]+"
+    DEFAULT_SPLIT_PATTERN = r"[。？！!?\n…]+"
     
     # 成对符号映射
     PAIR_MAP = {

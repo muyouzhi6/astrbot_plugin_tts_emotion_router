@@ -199,7 +199,8 @@ class SegmentedTTSProcessor:
                     audio_path = await self.tts_processor.generate_audio(
                         segment.text,
                         voice_uri,
-                        speed
+                        speed,
+                        emotion=emotion,
                     )
                     
                     if not audio_path:
@@ -298,7 +299,8 @@ class SegmentedTTSProcessor:
                     audio_path = await self.tts_processor.generate_audio(
                         segment.text,
                         voice_uri,
-                        speed
+                        speed,
+                        emotion=emotion,
                     )
                     
                     if audio_path:

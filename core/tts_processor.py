@@ -85,7 +85,9 @@ class TTSConditionChecker:
         self,
         text: str,
         session_state: SessionState,
-        has_non_plain_elements: bool = False
+        has_non_plain_elements: bool = False,
+        *,
+        enable_probability: bool = True,
     ) -> TTSCheckResult:
         """
         执行所有检查。
@@ -121,9 +123,10 @@ class TTSConditionChecker:
             return TTSCheckResult(False, f"cooldown ({remaining:.1f}s)", remaining)
             
         # 5. 概率检查
-        is_prob_ok, roll = self.check_probability()
-        if not is_prob_ok:
-            return TTSCheckResult(False, f"probability check failed ({roll:.2f} > {self.prob})")
+        if enable_probability:
+            is_prob_ok, roll = self.check_probability()
+            if not is_prob_ok:
+                return TTSCheckResult(False, f"probability check failed ({roll:.2f} > {self.prob})")
             
         return TTSCheckResult(True)
     
@@ -215,7 +218,12 @@ class TTSProcessor:
             logger.info(f"TTS: emotion={emotion}, voice={voice_key}, speed={speed}")
             
             # 4. 生成音频
-            audio_path = await self.generate_audio(text, voice_uri, speed)
+            audio_path = await self.generate_audio(
+                text,
+                voice_uri,
+                speed,
+                emotion=emotion,
+            )
             
             if audio_path:
                 result.success = True
@@ -293,7 +301,9 @@ class TTSProcessor:
         self,
         text: str,
         voice_uri: str,
-        speed: float
+        speed: float,
+        *,
+        emotion: Optional[str] = None,
     ) -> Optional[Path]:
         """生成 TTS 音频。"""
         try:
@@ -301,7 +311,8 @@ class TTSProcessor:
                 text,
                 voice_uri,
                 TEMP_DIR,
-                speed=speed
+                speed=speed,
+                emotion=emotion,
             )
             
             if not audio_path:

@@ -47,8 +47,15 @@ class SiliconFlowTTS:
         return ct.startswith("audio/") or ct.startswith("application/octet-stream")
 
     async def synth(
-        self, text: str, voice: str, out_dir: Path, speed: Optional[float] = None
+        self,
+        text: str,
+        voice: str,
+        out_dir: Path,
+        speed: Optional[float] = None,
+        *,
+        emotion: Optional[str] = None,
     ) -> Optional[Path]:
+        _ = emotion
         out_dir.mkdir(parents=True, exist_ok=True)
 
         if not self.api_url or not self.api_key:

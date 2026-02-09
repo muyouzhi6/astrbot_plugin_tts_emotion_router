@@ -276,7 +276,18 @@ class TTSHooksHandler:
             return False, f"cooldown ({remaining:.1f}s remaining)"
         
         # 长度检查
-        if not self.condition_checker.check_text_length(text):
+        if (
+            getattr(self.condition_checker, "text_min_limit", 0) > 0
+            and len(text) < self.condition_checker.text_min_limit
+        ):
+            return (
+                False,
+                f"text too short ({len(text)} < {self.condition_checker.text_min_limit})",
+            )
+        if (
+            getattr(self.condition_checker, "text_limit", 0) > 0
+            and len(text) > self.condition_checker.text_limit
+        ):
             return False, f"text too long ({len(text)} > {self.condition_checker.text_limit})"
         
         # 概率检查

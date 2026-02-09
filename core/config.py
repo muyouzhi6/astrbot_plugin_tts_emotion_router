@@ -1,801 +1,544 @@
 # -*- coding: utf-8 -*-
-"""
-TTS Emotion Router - Configuration
-
-配置管理模块，处理配置的加载、保存和迁移。
-"""
+"""TTS Emotion Router - Configuration Manager (v3.1 Simplified)"""
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import json
 import logging
-import asyncio
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from .constants import (
     CONFIG_FILE,
-    CONFIG_MIGRATE_KEYS,
-    DEFAULT_API_MODEL,
     DEFAULT_API_FORMAT,
-    DEFAULT_API_SPEED,
     DEFAULT_API_GAIN,
-    DEFAULT_SAMPLE_RATE_MP3_WAV,
-    DEFAULT_SAMPLE_RATE_OTHER,
-    DEFAULT_PROB,
-    DEFAULT_TEXT_LIMIT,
-    DEFAULT_TEXT_MIN_LIMIT,
+    DEFAULT_API_MAX_RETRIES,
+    DEFAULT_API_MODEL,
+    DEFAULT_API_SPEED,
+    DEFAULT_API_TIMEOUT,
     DEFAULT_COOLDOWN,
     DEFAULT_EMO_MARKER_TAG,
     DEFAULT_EMOTION_KEYWORDS_LIST,
+    DEFAULT_FEATURE_MODE,
+    DEFAULT_MINIMAX_BITRATE,
+    DEFAULT_MINIMAX_CHANNEL,
+    DEFAULT_MINIMAX_MODEL,
+    DEFAULT_MINIMAX_PITCH,
+    DEFAULT_MINIMAX_URL,
+    DEFAULT_MINIMAX_VOICE_ID,
+    DEFAULT_MINIMAX_VOL,
+    DEFAULT_PROB,
+    DEFAULT_PROBABILITY_OUTPUT_ENABLE,
+    DEFAULT_SAMPLE_RATE_MP3_WAV,
+    DEFAULT_SAMPLE_RATE_OTHER,
     DEFAULT_SEGMENTED_MIN_SEGMENT_LENGTH,
+    DEFAULT_SEGMENTED_OUTPUT_ENABLE,
+    DEFAULT_SILICONFLOW_URL,
+    DEFAULT_TEXT_LIMIT,
+    DEFAULT_TEXT_MIN_LIMIT,
+    DEFAULT_TEXT_VOICE_ENABLE,
+    DEFAULT_TTS_PROVIDER,
+    DEFAULT_VOICE_OUTPUT_ENABLE,
 )
 
 logger = logging.getLogger(__name__)
 
+FEATURE_VOICE_OUTPUT = "voice_output"
+FEATURE_TEXT_VOICE = "text_voice_output"
+FEATURE_SEGMENTED = "segmented_output"
+FEATURE_PROBABILITY = "probability_output"
+
+VALID_FEATURES = {
+    FEATURE_VOICE_OUTPUT,
+    FEATURE_TEXT_VOICE,
+    FEATURE_SEGMENTED,
+    FEATURE_PROBABILITY,
+}
+
+
+def _normalize_mode(mode: Any) -> str:
+    value = str(mode or DEFAULT_FEATURE_MODE).strip().lower()
+    return "whitelist" if value == "whitelist" else "blacklist"
+
+
+def _safe_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
 
 class ConfigManager:
+    """Configuration manager for TTS Emotion Router.
+
+    Supports AstrBotConfig (WebUI) and local JSON fallback.
+    All mutation methods are async-only to avoid sync/async duplication.
     """
-    配置管理器。
-    
-    支持两种配置模式：
-    1. AstrBotConfig 模式：使用面板生成的插件配置
-    2. 本地 JSON 模式：直接读写插件目录下的 config.json
-    """
-    
+
     def __init__(self, config: Optional[Any] = None):
-        """
-        初始化配置管理器。
-        
-        Args:
-            config: 可以是 AstrBotConfig 实例、dict 或 None
-        """
         self._is_astrbot_config = False
         self._config: Union[Any, Dict[str, Any]] = {}
-        
-        # 检测配置类型
+        self._save_lock = asyncio.Lock()
+
         try:
             from astrbot.core.config.astrbot_config import AstrBotConfig
             if isinstance(config, AstrBotConfig):
                 self._is_astrbot_config = True
                 self._config = config
-                self._try_migrate_from_local()
             else:
-                self._config = self._load_local_config(config or {})
+                self._config = config or {}
         except ImportError:
-            self._config = self._load_local_config(config or {})
-            
+            self._config = config or {}
+
         self._ensure_defaults()
-    
-    def _ensure_defaults(self) -> None:
-        """确保配置中包含必要的默认结构，以便 UI 正确生成。"""
-        # 确保 emotion.keywords 存在
-        if "emotion" not in self._config:
-            self._config["emotion"] = {}
-        
-        emo_cfg = self._config["emotion"]
-        if "keywords" not in emo_cfg:
-            emo_cfg["keywords"] = DEFAULT_EMOTION_KEYWORDS_LIST
-            # 如果是 AstrBotConfig，可能需要触发保存或更新？
-            # 这里直接修改 dict 引用，通常 AstrBotConfig 会代理 __getitem__/__setitem__
-            
-    def _try_migrate_from_local(self) -> None:
-        """尝试从本地 config.json 迁移配置到 AstrBotConfig。"""
-        try:
-            if getattr(self._config, "first_deploy", False) and CONFIG_FILE.exists():
-                disk = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-                # 仅拷贝已知字段，避免脏键
-                for k in CONFIG_MIGRATE_KEYS:
-                    if k in disk:
-                        self._config[k] = disk[k]
-                # 调用 AstrBotConfig 的 save_config 方法
-                if hasattr(self._config, "save_config"):
-                    self._config.save_config()  # type: ignore
-                logger.info("migrated config from local file")
-        except Exception as e:
-            logger.warning(f"config migration failed: {e}")
-    
-    def _load_local_config(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        加载本地配置文件。
-        
-        Args:
-            cfg: 传入的配置字典
-            
-        Returns:
-            合并后的配置字典
-        """
-        try:
-            if CONFIG_FILE.exists():
-                disk = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-            else:
-                disk = {}
-        except Exception as e:
-            logger.error(f"failed to load local config: {e}")
-            disk = {}
-        
-        merged = {**disk, **(cfg or {})}
-        
-        # 写回磁盘
-        try:
-            CONFIG_FILE.write_text(
-                json.dumps(merged, ensure_ascii=False, indent=2),
-                encoding="utf-8"
-            )
-        except Exception as e:
-            logger.error(f"failed to write local config: {e}")
-        
-        return merged
-    
-    def save(self) -> None:
-        """保存配置到持久化存储（同步版本，不建议在事件循环中使用）。"""
-        if self._is_astrbot_config:
-            if hasattr(self._config, "save_config"):
-                self._config.save_config()  # type: ignore
-        else:
-            try:
-                CONFIG_FILE.write_text(
-                    json.dumps(self._config, ensure_ascii=False, indent=2),
-                    encoding="utf-8"
-                )
-            except Exception as e:
-                logger.error(f"save config failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Save
+    # ------------------------------------------------------------------
 
     async def save_async(self) -> None:
-        """异步保存配置到持久化存储。"""
-        if self._is_astrbot_config:
-            # AstrBotConfig 目前没有异步 save 接口，只能调用同步的
-            # 如果 save_config 内部有阻塞操作，这里应该 wrap 一下
-            if hasattr(self._config, "save_config"):
-                await asyncio.to_thread(self._config.save_config) # type: ignore
-        else:
+        async with self._save_lock:
+            if self._is_astrbot_config:
+                if hasattr(self._config, "save_config"):
+                    await asyncio.to_thread(self._config.save_config)
+                return
             try:
                 def _write():
                     CONFIG_FILE.write_text(
                         json.dumps(self._config, ensure_ascii=False, indent=2),
-                        encoding="utf-8"
+                        encoding="utf-8",
                     )
                 await asyncio.to_thread(_write)
             except Exception as e:
-                logger.error(f"save config failed: {e}")
-    
+                logger.error("Save config failed: %s", e)
+
+    # ------------------------------------------------------------------
+    # Basic dict-like APIs
+    # ------------------------------------------------------------------
+
     def get(self, key: str, default: Any = None) -> Any:
-        """
-        获取配置值。
-        
-        Args:
-            key: 配置键名
-            default: 默认值
-            
-        Returns:
-            配置值
-        """
         try:
-            if self._is_astrbot_config:
-                return self._config.get(key, default)
             return self._config.get(key, default)
-        except Exception as e:
-            logger.error(f"get config error: key={key}, error={e}")
+        except Exception:
             return default
-    
-    def set(self, key: str, value: Any, save: bool = False) -> None:
-        """
-        设置配置值（同步保存，已废弃，请使用 set_async）。
-        """
-        self._config[key] = value
-        if save:
-            self.save()
 
-    async def set_async(self, key: str, value: Any, save: bool = False) -> None:
-        """
-        异步设置配置值。
-        
-        Args:
-            key: 配置键名
-            value: 配置值
-            save: 是否立即保存
-        """
+    async def set_and_save(self, key: str, value: Any) -> None:
         self._config[key] = value
-        if save:
-            await self.save_async()
-    
+        await self.save_async()
+
     def __getitem__(self, key: str) -> Any:
-        """支持 config[key] 语法。"""
         return self.get(key)
-    
-    def __setitem__(self, key: str, value: Any) -> None:
-        """支持 config[key] = value 语法。"""
-        self.set(key, value)
-    
+
     def __contains__(self, key: str) -> bool:
-        """支持 key in config 语法。"""
         try:
-            if self._is_astrbot_config:
-                return key in self._config
             return key in self._config
-        except Exception as e:
-            logger.error(f"config contains check error: key={key}, error={e}")
+        except Exception:
             return False
-    
-    @property
-    def raw(self) -> Union[Any, Dict[str, Any]]:
-        """获取原始配置对象。"""
-        return self._config
-    
-    # ==================== 便捷属性 ====================
-    
-    def get_api_config(self) -> Dict[str, Any]:
-        """获取 API 配置。"""
-        api = self.get("api", {}) or {}
+
+    # ------------------------------------------------------------------
+    # Defaults
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _feature_defaults(enable: bool) -> Dict[str, Any]:
         return {
-            "url": api.get("url", ""),
-            "key": api.get("key", ""),
-            "model": api.get("model", DEFAULT_API_MODEL),
-            "format": api.get("format", DEFAULT_API_FORMAT),
-            "speed": float(api.get("speed", DEFAULT_API_SPEED)),
-            "gain": float(api.get("gain", DEFAULT_API_GAIN)),
-            "sample_rate": int(api.get(
-                "sample_rate",
-                DEFAULT_SAMPLE_RATE_MP3_WAV
-                if api.get("format", DEFAULT_API_FORMAT) in ("mp3", "wav")
-                else DEFAULT_SAMPLE_RATE_OTHER
-            )),
+            "enable": enable,
+            "mode": DEFAULT_FEATURE_MODE,
+            "enabled_umos": [],
+            "disabled_umos": [],
         }
-    
-    def get_voice_map(self) -> Dict[str, str]:
-        """获取情绪-音色映射。"""
-        return self.get("voice_map", {}) or {}
-    
-    def get_speed_map(self) -> Dict[str, float]:
-        """获取情绪-语速映射。"""
-        return self.get("speed_map", {}) or {}
-    
-    def get_global_enable(self) -> bool:
-        """获取全局开关状态。"""
-        return bool(self.get("global_enable", True))
-    
-    def get_enabled_sessions(self) -> List[str]:
-        """获取白名单会话列表（已废弃，请使用 get_enabled_umos）。"""
-        # 向后兼容：优先读取新的 enabled_umos，如果不存在则尝试读取旧的 enabled_sessions
-        umos = self.get("enabled_umos", None)
-        if umos is not None:
-            return list(umos)
-        return list(self.get("enabled_sessions", []))
-    
-    def get_disabled_sessions(self) -> List[str]:
-        """获取黑名单会话列表（已废弃，请使用 get_disabled_umos）。"""
-        # 向后兼容：优先读取新的 disabled_umos，如果不存在则尝试读取旧的 disabled_sessions
-        umos = self.get("disabled_umos", None)
-        if umos is not None:
-            return list(umos)
-        return list(self.get("disabled_sessions", []))
-    
-    def get_enabled_umos(self) -> List[str]:
-        """
-        获取白名单 UMO（统一消息来源）列表。
-        
-        UMO 格式示例：
-        - 私聊: "GroupId_UserId"（如 "0_123456"）
-        - 群聊: "GroupId_UserId"（如 "789_123456"）
-        
-        可通过 /sid 命令获取当前会话的 UMO 值。
-        
-        Returns:
-            List[str]: 白名单 UMO 列表
-        """
-        # 向后兼容：优先读取新的 enabled_umos，如果不存在则尝试读取旧的 enabled_sessions
-        umos = self.get("enabled_umos", None)
-        if umos is not None:
-            return list(umos)
-        return list(self.get("enabled_sessions", []))
-    
-    def get_disabled_umos(self) -> List[str]:
-        """
-        获取黑名单 UMO（统一消息来源）列表。
-        
-        UMO 格式示例：
-        - 私聊: "GroupId_UserId"（如 "0_123456"）
-        - 群聊: "GroupId_UserId"（如 "789_123456"）
-        
-        可通过 /sid 命令获取当前会话的 UMO 值。
-        
-        Returns:
-            List[str]: 黑名单 UMO 列表
-        """
-        # 向后兼容：优先读取新的 disabled_umos，如果不存在则尝试读取旧的 disabled_sessions
-        umos = self.get("disabled_umos", None)
-        if umos is not None:
-            return list(umos)
-        return list(self.get("disabled_sessions", []))
-    
-    def get_text_voice_umos(self) -> List[str]:
-        """
-        获取文字+语音同显 UMO 列表。
-        
-        在此列表中的 UMO 会同时发送文字和语音消息。
-        
-        Returns:
-            List[str]: 文字+语音同显 UMO 列表
-        """
-        return list(self.get("text_voice_umos", []))
-    
-    def get_prob(self) -> float:
-        """获取 TTS 触发概率。"""
-        return float(self.get("prob", DEFAULT_PROB))
-    
-    def get_text_limit(self) -> int:
-        """获取文本长度上限。"""
-        return int(self.get("text_limit", DEFAULT_TEXT_LIMIT))
-    
-    def get_text_min_limit(self) -> int:
-        """获取文本长度下限（低于此值不触发TTS）。"""
-        return int(self.get("text_min_limit", DEFAULT_TEXT_MIN_LIMIT))
-    
-    def get_cooldown(self) -> int:
-        """获取冷却时间。"""
-        return int(self.get("cooldown", DEFAULT_COOLDOWN))
-    
-    def get_allow_mixed(self) -> bool:
-        """获取是否允许混合输出。"""
-        return bool(self.get("allow_mixed", False))
-    
-    def get_show_references(self) -> bool:
-        """获取是否显示参考文献。"""
-        return bool(self.get("show_references", True))
-    
-    def get_emotion_config(self) -> Dict[str, Any]:
-        """获取情绪配置。"""
-        return self.get("emotion", {}) or {}
-    
-    def get_marker_config(self) -> Dict[str, Any]:
-        """获取情绪标记配置。"""
-        emo_cfg = self.get_emotion_config()
-        if isinstance(emo_cfg, dict):
-            return emo_cfg.get("marker", {}) or {}
-        return {}
-    
-    def is_marker_enabled(self) -> bool:
-        """检查情绪标记是否启用。"""
-        return bool(self.get_marker_config().get("enable", True))
-    
-    def get_marker_tag(self) -> str:
-        """获取情绪标记标签。"""
-        return str(self.get_marker_config().get("tag", DEFAULT_EMO_MARKER_TAG))
-    
-    def get_emotion_keywords(self) -> Dict[str, List[str]]:
-        """
-        获取情绪关键词配置。
-        
-        Returns:
-            Dict[str, List[str]]: 情绪关键词字典，如 {"happy": ["开心", ...], ...}
-        """
-        emo_cfg = self.get_emotion_config()
-        if isinstance(emo_cfg, dict):
-            return emo_cfg.get("keywords", {}) or {}
-        return {}
 
-    # ==================== 会话管理（UMO 版本） ====================
-    
-    def is_session_enabled(self, session_id: str, global_enable: bool) -> bool:
-        """
-        检查会话是否启用 TTS（已废弃，请使用 is_umo_enabled）。
-        
-        Args:
-            session_id: 会话 ID（现在应使用 UMO）
-            global_enable: 当前全局开关状态
-            
-        Returns:
-            如果会话启用 TTS 返回 True
-        """
-        return self.is_umo_enabled(session_id, global_enable)
-    
-    def is_umo_enabled(self, umo: str, global_enable: bool) -> bool:
-        """
-        检查 UMO（统一消息来源）是否启用 TTS。
-        
-        Args:
-            umo: 统一消息来源标识（可通过 /sid 命令获取）
-            global_enable: 当前全局开关状态
-            
-        Returns:
-            如果该 UMO 启用 TTS 返回 True
-        """
-        if global_enable:
-            # 黑名单模式：默认开启，在黑名单中则关闭
-            return umo not in self.get_disabled_umos()
-        else:
-            # 白名单模式：默认关闭，在白名单中则开启
-            return umo in self.get_enabled_umos()
-    
-    def is_text_voice_enabled_for_umo(self, umo: str) -> bool:
-        """
-        检查 UMO 是否启用文字+语音同显。
-        
-        Args:
-            umo: 统一消息来源标识
-            
-        Returns:
-            如果该 UMO 启用文字+语音同显返回 True
-        """
-        return umo in self.get_text_voice_umos()
-    
-    # ---------- 白名单操作（UMO 版本） ----------
-    
-    def add_to_enabled(self, session_id: str) -> None:
-        """添加会话到白名单（同步，已废弃，请使用 add_to_enabled_umos）。"""
-        self.add_to_enabled_umos(session_id)
+    def _ensure_defaults(self) -> None:
+        # UMO guide
+        raw_umo_guide = str(self._config.get("umo_guide", "") or "").strip()
+        if not raw_umo_guide or "/sid" not in raw_umo_guide:
+            self._config["umo_guide"] = "在聊天中发送 /sid 获取当前会话 UMO。"
 
-    async def add_to_enabled_async(self, session_id: str) -> None:
-        """添加会话到白名单（异步，已废弃，请使用 add_to_enabled_umos_async）。"""
-        await self.add_to_enabled_umos_async(session_id)
-    
-    def add_to_enabled_umos(self, umo: str) -> None:
-        """
-        添加 UMO 到白名单（同步）。
-        
-        Args:
-            umo: 统一消息来源标识（可通过 /sid 命令获取）
-        """
-        umos = self.get_enabled_umos()
-        if umo not in umos:
-            umos.append(umo)
-            self.set("enabled_umos", umos, save=True)
-    
+        # Feature policies
+        fp = self.get("feature_policies", {}) or {}
+        for feat, default_enable in [
+            (FEATURE_VOICE_OUTPUT, DEFAULT_VOICE_OUTPUT_ENABLE),
+            (FEATURE_TEXT_VOICE, DEFAULT_TEXT_VOICE_ENABLE),
+            (FEATURE_SEGMENTED, DEFAULT_SEGMENTED_OUTPUT_ENABLE),
+            (FEATURE_PROBABILITY, DEFAULT_PROBABILITY_OUTPUT_ENABLE),
+        ]:
+            if feat not in fp:
+                fp[feat] = self._feature_defaults(default_enable)
+        self._config["feature_policies"] = fp
+
+        # Probability
+        probability = self.get("probability", {}) or {}
+        if "prob" not in probability:
+            probability["prob"] = DEFAULT_PROB
+        self._config["probability"] = probability
+
+        # Scalar defaults
+        defaults = {
+            "text_limit": DEFAULT_TEXT_LIMIT,
+            "text_min_limit": DEFAULT_TEXT_MIN_LIMIT,
+            "cooldown": DEFAULT_COOLDOWN,
+            "allow_mixed": False,
+            "show_references": True,
+        }
+        for k, v in defaults.items():
+            if k not in self._config:
+                self._config[k] = v
+
+        # TTS engine
+        engine = self.get("tts_engine", {}) or {}
+        if "provider" not in engine:
+            engine["provider"] = DEFAULT_TTS_PROVIDER
+        if "timeout" not in engine:
+            engine["timeout"] = DEFAULT_API_TIMEOUT
+        if "max_retries" not in engine:
+            engine["max_retries"] = DEFAULT_API_MAX_RETRIES
+
+        sf = engine.get("siliconflow", {}) or {}
+        sf_defaults = {
+            "url": DEFAULT_SILICONFLOW_URL,
+            "key": "",
+            "model": DEFAULT_API_MODEL,
+            "format": DEFAULT_API_FORMAT,
+            "speed": DEFAULT_API_SPEED,
+            "gain": DEFAULT_API_GAIN,
+            "sample_rate": DEFAULT_SAMPLE_RATE_MP3_WAV,
+            "default_voice": "",
+        }
+        for k, v in sf_defaults.items():
+            if k not in sf:
+                sf[k] = v
+        engine["siliconflow"] = sf
+
+        mm = engine.get("minimax", {}) or {}
+        mm_defaults = {
+            "url": DEFAULT_MINIMAX_URL,
+            "key": "",
+            "model": DEFAULT_MINIMAX_MODEL,
+            "voice_id": DEFAULT_MINIMAX_VOICE_ID,
+            "speed": DEFAULT_API_SPEED,
+            "vol": DEFAULT_MINIMAX_VOL,
+            "pitch": DEFAULT_MINIMAX_PITCH,
+            "emotion": "neutral",
+            "audio_format": DEFAULT_API_FORMAT,
+            "sample_rate": 32000,
+            "bitrate": DEFAULT_MINIMAX_BITRATE,
+            "channel": DEFAULT_MINIMAX_CHANNEL,
+            "subtitle_enable": False,
+            "pronunciation_dict": {},
+        }
+        for k, v in mm_defaults.items():
+            if k not in mm:
+                mm[k] = v
+        engine["minimax"] = mm
+        self._config["tts_engine"] = engine
+
+        # Emotion route
+        route = self.get("emotion_route", {}) or {}
+        route_defaults = {
+            "enable": True,
+            "voice_map": {},
+            "speed_map": {},
+            "keywords": copy.deepcopy(DEFAULT_EMOTION_KEYWORDS_LIST),
+        }
+        for k, v in route_defaults.items():
+            if k not in route:
+                route[k] = v
+        marker = route.get("marker", {}) or {}
+        if "enable" not in marker:
+            marker["enable"] = True
+        if "tag" not in marker:
+            marker["tag"] = DEFAULT_EMO_MARKER_TAG
+        route["marker"] = marker
+        self._config["emotion_route"] = route
+
+        # Segmented TTS
+        seg = self.get("segmented_tts", {}) or {}
+        seg_defaults = {
+            "enable": False,
+            "interval_mode": "fixed",
+            "fixed_interval": 1.5,
+            "adaptive_buffer": 0.5,
+            "max_segments": 10,
+            "min_segment_chars": 50,
+            "split_pattern": r"[。？！!?\n…]+",
+            "min_segment_length": DEFAULT_SEGMENTED_MIN_SEGMENT_LENGTH,
+        }
+        for k, v in seg_defaults.items():
+            if k not in seg:
+                seg[k] = v
+        # Fix corrupted split_pattern (encoding issues)
+        raw_sp = str(seg.get("split_pattern", ""))
+        if any(c in raw_sp for c in ("銆", "鈥", "閵")):
+            seg["split_pattern"] = r"[。？！!?\n…]+"
+        self._config["segmented_tts"] = seg
+
+    # ------------------------------------------------------------------
+    # Feature policy APIs
+    # ------------------------------------------------------------------
+
+    def get_feature_policy(self, feature: str) -> Dict[str, Any]:
+        if feature not in VALID_FEATURES:
+            return self._feature_defaults(False)
+        policies = self.get("feature_policies", {}) or {}
+        policy = copy.deepcopy(policies.get(feature, {}))
+        defaults = self._feature_defaults(False)
+        defaults.update(policy)
+        defaults["mode"] = _normalize_mode(defaults.get("mode"))
+        defaults["enabled_umos"] = list(defaults.get("enabled_umos", []) or [])
+        defaults["disabled_umos"] = list(defaults.get("disabled_umos", []) or [])
+        defaults["enable"] = bool(defaults.get("enable", False))
+        return defaults
+
+    async def set_feature_policy_async(self, feature: str, policy: Dict[str, Any]) -> None:
+        if feature not in VALID_FEATURES:
+            return
+        merged = self.get_feature_policy(feature)
+        merged.update(policy or {})
+        merged["mode"] = _normalize_mode(merged.get("mode"))
+        merged["enabled_umos"] = list(merged.get("enabled_umos", []) or [])
+        merged["disabled_umos"] = list(merged.get("disabled_umos", []) or [])
+        merged["enable"] = bool(merged.get("enable", False))
+
+        policies = self.get("feature_policies", {}) or {}
+        policies[feature] = merged
+        await self.set_and_save("feature_policies", policies)
+
+    def _is_feature_enabled_for_umo(self, feature: str, umo: str) -> bool:
+        policy = self.get_feature_policy(feature)
+        if not policy["enable"]:
+            return False
+        if _normalize_mode(policy["mode"]) == "whitelist":
+            return umo in policy["enabled_umos"]
+        return umo not in policy["disabled_umos"]
+
+    def is_voice_output_enabled_for_umo(self, umo: str) -> bool:
+        return self._is_feature_enabled_for_umo(FEATURE_VOICE_OUTPUT, umo)
+
+    def is_text_voice_output_enabled_for_umo(self, umo: str) -> bool:
+        return self._is_feature_enabled_for_umo(FEATURE_TEXT_VOICE, umo)
+
+    def is_segmented_output_enabled_for_umo(self, umo: str) -> bool:
+        return self._is_feature_enabled_for_umo(FEATURE_SEGMENTED, umo)
+
+    def is_probability_output_enabled_for_umo(self, umo: str) -> bool:
+        return self._is_feature_enabled_for_umo(FEATURE_PROBABILITY, umo)
+
+    # ------------------------------------------------------------------
+    # UMO list mutation (unified for all features)
+    # ------------------------------------------------------------------
+
+    async def add_umo_to_feature(self, feature: str, umo: str, list_name: str = "enabled_umos") -> None:
+        policy = self.get_feature_policy(feature)
+        if umo not in policy[list_name]:
+            policy[list_name].append(umo)
+            await self.set_feature_policy_async(feature, policy)
+
+    async def remove_umo_from_feature(self, feature: str, umo: str, list_name: str = "enabled_umos") -> None:
+        policy = self.get_feature_policy(feature)
+        if umo in policy[list_name]:
+            policy[list_name].remove(umo)
+            await self.set_feature_policy_async(feature, policy)
+
+    # Convenience shortcuts for voice_output
     async def add_to_enabled_umos_async(self, umo: str) -> None:
-        """
-        添加 UMO 到白名单（异步）。
-        
-        Args:
-            umo: 统一消息来源标识（可通过 /sid 命令获取）
-        """
-        umos = self.get_enabled_umos()
-        if umo not in umos:
-            umos.append(umo)
-            await self.set_async("enabled_umos", umos, save=True)
-    
-    def remove_from_enabled(self, session_id: str) -> None:
-        """从白名单移除会话（同步，已废弃，请使用 remove_from_enabled_umos）。"""
-        self.remove_from_enabled_umos(session_id)
+        await self.add_umo_to_feature(FEATURE_VOICE_OUTPUT, umo, "enabled_umos")
 
-    async def remove_from_enabled_async(self, session_id: str) -> None:
-        """从白名单移除会话（异步，已废弃，请使用 remove_from_enabled_umos_async）。"""
-        await self.remove_from_enabled_umos_async(session_id)
-    
-    def remove_from_enabled_umos(self, umo: str) -> None:
-        """
-        从白名单移除 UMO（同步）。
-        
-        Args:
-            umo: 统一消息来源标识
-        """
-        umos = self.get_enabled_umos()
-        if umo in umos:
-            umos.remove(umo)
-            self.set("enabled_umos", umos, save=True)
-    
     async def remove_from_enabled_umos_async(self, umo: str) -> None:
-        """
-        从白名单移除 UMO（异步）。
-        
-        Args:
-            umo: 统一消息来源标识
-        """
-        umos = self.get_enabled_umos()
-        if umo in umos:
-            umos.remove(umo)
-            await self.set_async("enabled_umos", umos, save=True)
-    
-    # ---------- 黑名单操作（UMO 版本） ----------
-    
-    def add_to_disabled(self, session_id: str) -> None:
-        """添加会话到黑名单（同步，已废弃，请使用 add_to_disabled_umos）。"""
-        self.add_to_disabled_umos(session_id)
+        await self.remove_umo_from_feature(FEATURE_VOICE_OUTPUT, umo, "enabled_umos")
 
-    async def add_to_disabled_async(self, session_id: str) -> None:
-        """添加会话到黑名单（异步，已废弃，请使用 add_to_disabled_umos_async）。"""
-        await self.add_to_disabled_umos_async(session_id)
-    
-    def add_to_disabled_umos(self, umo: str) -> None:
-        """
-        添加 UMO 到黑名单（同步）。
-        
-        Args:
-            umo: 统一消息来源标识（可通过 /sid 命令获取）
-        """
-        umos = self.get_disabled_umos()
-        if umo not in umos:
-            umos.append(umo)
-            self.set("disabled_umos", umos, save=True)
-    
     async def add_to_disabled_umos_async(self, umo: str) -> None:
-        """
-        添加 UMO 到黑名单（异步）。
-        
-        Args:
-            umo: 统一消息来源标识（可通过 /sid 命令获取）
-        """
-        umos = self.get_disabled_umos()
-        if umo not in umos:
-            umos.append(umo)
-            await self.set_async("disabled_umos", umos, save=True)
-    
-    def remove_from_disabled(self, session_id: str) -> None:
-        """从黑名单移除会话（同步，已废弃，请使用 remove_from_disabled_umos）。"""
-        self.remove_from_disabled_umos(session_id)
+        await self.add_umo_to_feature(FEATURE_VOICE_OUTPUT, umo, "disabled_umos")
 
-    async def remove_from_disabled_async(self, session_id: str) -> None:
-        """从黑名单移除会话（异步，已废弃，请使用 remove_from_disabled_umos_async）。"""
-        await self.remove_from_disabled_umos_async(session_id)
-    
-    def remove_from_disabled_umos(self, umo: str) -> None:
-        """
-        从黑名单移除 UMO（同步）。
-        
-        Args:
-            umo: 统一消息来源标识
-        """
-        umos = self.get_disabled_umos()
-        if umo in umos:
-            umos.remove(umo)
-            self.set("disabled_umos", umos, save=True)
-    
     async def remove_from_disabled_umos_async(self, umo: str) -> None:
-        """
-        从黑名单移除 UMO（异步）。
-        
-        Args:
-            umo: 统一消息来源标识
-        """
-        umos = self.get_disabled_umos()
-        if umo in umos:
-            umos.remove(umo)
-            await self.set_async("disabled_umos", umos, save=True)
-    
-    # ---------- 文字+语音同显操作（新增） ----------
-    
-    def add_to_text_voice_umos(self, umo: str) -> None:
-        """
-        添加 UMO 到文字+语音同显列表（同步）。
-        
-        Args:
-            umo: 统一消息来源标识（可通过 /sid 命令获取）
-        """
-        umos = self.get_text_voice_umos()
-        if umo not in umos:
-            umos.append(umo)
-            self.set("text_voice_umos", umos, save=True)
-    
-    async def add_to_text_voice_umos_async(self, umo: str) -> None:
-        """
-        添加 UMO 到文字+语音同显列表（异步）。
-        
-        Args:
-            umo: 统一消息来源标识（可通过 /sid 命令获取）
-        """
-        umos = self.get_text_voice_umos()
-        if umo not in umos:
-            umos.append(umo)
-            await self.set_async("text_voice_umos", umos, save=True)
-    
-    def remove_from_text_voice_umos(self, umo: str) -> None:
-        """
-        从文字+语音同显列表移除 UMO（同步）。
-        
-        Args:
-            umo: 统一消息来源标识
-        """
-        umos = self.get_text_voice_umos()
-        if umo in umos:
-            umos.remove(umo)
-            self.set("text_voice_umos", umos, save=True)
-    
-    async def remove_from_text_voice_umos_async(self, umo: str) -> None:
-        """
-        从文字+语音同显列表移除 UMO（异步）。
-        
-        Args:
-            umo: 统一消息来源标识
-        """
-        umos = self.get_text_voice_umos()
-        if umo in umos:
-            umos.remove(umo)
-            await self.set_async("text_voice_umos", umos, save=True)
-            
-    # ==================== 配置修改 ====================
-    
-    def set_global_enable(self, enable: bool) -> None:
-        self.set("global_enable", enable, save=True)
+        await self.remove_umo_from_feature(FEATURE_VOICE_OUTPUT, umo, "disabled_umos")
 
-    async def set_global_enable_async(self, enable: bool) -> None:
-        await self.set_async("global_enable", enable, save=True)
-        
-    def set_prob(self, prob: float) -> None:
-        self.set("prob", prob, save=True)
+    # ------------------------------------------------------------------
+    # TTS engine APIs
+    # ------------------------------------------------------------------
+
+    def get_tts_provider(self) -> str:
+        engine = self.get("tts_engine", {}) or {}
+        provider = str(engine.get("provider", DEFAULT_TTS_PROVIDER)).strip().lower()
+        return provider if provider in {"siliconflow", "minimax"} else DEFAULT_TTS_PROVIDER
+
+    def is_emotion_route_enabled(self) -> bool:
+        return bool((self.get("emotion_route", {}) or {}).get("enable", True))
+
+    def get_default_voice(self) -> str:
+        route = self.get("emotion_route", {}) or {}
+        if self.is_emotion_route_enabled():
+            voice_map = route.get("voice_map", {}) or {}
+            if voice_map.get("neutral"):
+                return str(voice_map["neutral"])
+        api_cfg = self.get_api_config()
+        return str(api_cfg.get("default_voice", "") or "")
+
+    def get_api_config(self) -> Dict[str, Any]:
+        engine = self.get("tts_engine", {}) or {}
+        provider = self.get_tts_provider()
+        timeout = _safe_int(engine.get("timeout"), DEFAULT_API_TIMEOUT)
+        max_retries = _safe_int(engine.get("max_retries"), DEFAULT_API_MAX_RETRIES)
+
+        if provider == "minimax":
+            mm = engine.get("minimax", {}) or {}
+            audio_format = str(mm.get("audio_format", DEFAULT_API_FORMAT)).lower()
+            return {
+                "provider": "minimax",
+                "url": str(mm.get("url", DEFAULT_MINIMAX_URL)),
+                "key": str(mm.get("key", "")),
+                "model": str(mm.get("model", DEFAULT_MINIMAX_MODEL)),
+                "voice_id": str(mm.get("voice_id", DEFAULT_MINIMAX_VOICE_ID)),
+                "speed": _safe_float(mm.get("speed"), DEFAULT_API_SPEED),
+                "vol": _safe_float(mm.get("vol"), DEFAULT_MINIMAX_VOL),
+                "pitch": _safe_int(mm.get("pitch"), DEFAULT_MINIMAX_PITCH),
+                "emotion": str(mm.get("emotion", "neutral")),
+                "format": audio_format,
+                "sample_rate": _safe_int(mm.get("sample_rate"), 32000),
+                "bitrate": _safe_int(mm.get("bitrate"), DEFAULT_MINIMAX_BITRATE),
+                "channel": _safe_int(mm.get("channel"), DEFAULT_MINIMAX_CHANNEL),
+                "subtitle_enable": bool(mm.get("subtitle_enable", False)),
+                "pronunciation_dict": copy.deepcopy(mm.get("pronunciation_dict", {}) or {}),
+                "timeout": timeout,
+                "max_retries": max_retries,
+                "default_voice": str(mm.get("voice_id", DEFAULT_MINIMAX_VOICE_ID)),
+                "gain": 0.0,
+            }
+
+        sf = engine.get("siliconflow", {}) or {}
+        fmt = str(sf.get("format", DEFAULT_API_FORMAT)).lower()
+        sr_default = DEFAULT_SAMPLE_RATE_MP3_WAV if fmt in ("mp3", "wav") else DEFAULT_SAMPLE_RATE_OTHER
+        return {
+            "provider": "siliconflow",
+            "url": str(sf.get("url", DEFAULT_SILICONFLOW_URL)).rstrip("/"),
+            "key": str(sf.get("key", "")),
+            "model": str(sf.get("model", DEFAULT_API_MODEL)),
+            "format": fmt,
+            "speed": _safe_float(sf.get("speed"), DEFAULT_API_SPEED),
+            "gain": _safe_float(sf.get("gain"), DEFAULT_API_GAIN),
+            "sample_rate": _safe_int(sf.get("sample_rate"), sr_default),
+            "timeout": timeout,
+            "max_retries": max_retries,
+            "default_voice": str(sf.get("default_voice", "")),
+            "voice_id": str(sf.get("default_voice", "")),
+            "vol": DEFAULT_MINIMAX_VOL,
+            "pitch": DEFAULT_MINIMAX_PITCH,
+            "emotion": "neutral",
+            "bitrate": DEFAULT_MINIMAX_BITRATE,
+            "channel": DEFAULT_MINIMAX_CHANNEL,
+            "subtitle_enable": False,
+        }
+
+    # ------------------------------------------------------------------
+    # Emotion route + marker
+    # ------------------------------------------------------------------
+
+    def get_voice_map(self) -> Dict[str, str]:
+        route = self.get("emotion_route", {}) or {}
+        return dict(route.get("voice_map", {}) or {})
+
+    def get_speed_map(self) -> Dict[str, float]:
+        route = self.get("emotion_route", {}) or {}
+        return dict(route.get("speed_map", {}) or {})
+
+    def get_marker_config(self) -> Dict[str, Any]:
+        route = self.get("emotion_route", {}) or {}
+        return dict(route.get("marker", {}) or {})
+
+    def is_marker_enabled(self) -> bool:
+        return bool(self.get_marker_config().get("enable", True))
+
+    def get_marker_tag(self) -> str:
+        return str(self.get_marker_config().get("tag", DEFAULT_EMO_MARKER_TAG))
+
+    def get_emotion_keywords(self) -> Dict[str, List[str]]:
+        route = self.get("emotion_route", {}) or {}
+        return dict(route.get("keywords", {}) or {})
+
+    # ------------------------------------------------------------------
+    # Scalar getters
+    # ------------------------------------------------------------------
+
+    def get_global_enable(self) -> bool:
+        policy = self.get_feature_policy(FEATURE_VOICE_OUTPUT)
+        return bool(policy["enable"] and policy["mode"] == "blacklist")
+
+    def get_enabled_umos(self) -> List[str]:
+        return self.get_feature_policy(FEATURE_VOICE_OUTPUT)["enabled_umos"]
+
+    def get_disabled_umos(self) -> List[str]:
+        return self.get_feature_policy(FEATURE_VOICE_OUTPUT)["disabled_umos"]
+
+    def get_prob(self) -> float:
+        probability = self.get("probability", {}) or {}
+        return _safe_float(probability.get("prob"), DEFAULT_PROB)
+
+    def get_text_limit(self) -> int:
+        return _safe_int(self.get("text_limit", DEFAULT_TEXT_LIMIT), DEFAULT_TEXT_LIMIT)
+
+    def get_text_min_limit(self) -> int:
+        return _safe_int(self.get("text_min_limit", DEFAULT_TEXT_MIN_LIMIT), DEFAULT_TEXT_MIN_LIMIT)
+
+    def get_cooldown(self) -> int:
+        return _safe_int(self.get("cooldown", DEFAULT_COOLDOWN), DEFAULT_COOLDOWN)
+
+    def get_allow_mixed(self) -> bool:
+        return bool(self.get("allow_mixed", False))
+
+    def get_show_references(self) -> bool:
+        return bool(self.get("show_references", True))
+
+    # ------------------------------------------------------------------
+    # Async setters (no sync duplicates)
+    # ------------------------------------------------------------------
+
+    async def set_voice_output_enable_async(self, enable: bool) -> None:
+        await self.set_feature_policy_async(FEATURE_VOICE_OUTPUT, {"enable": bool(enable)})
 
     async def set_prob_async(self, prob: float) -> None:
-        await self.set_async("prob", prob, save=True)
-        
-    def set_text_limit(self, limit: int) -> None:
-        self.set("text_limit", limit, save=True)
+        probability = self.get("probability", {}) or {}
+        probability["prob"] = float(prob)
+        await self.set_and_save("probability", probability)
 
-    async def set_text_limit_async(self, limit: int) -> None:
-        await self.set_async("text_limit", limit, save=True)
-    
-    def set_text_min_limit(self, limit: int) -> None:
-        self.set("text_min_limit", limit, save=True)
+    # ------------------------------------------------------------------
+    # Segmented TTS
+    # ------------------------------------------------------------------
 
-    async def set_text_min_limit_async(self, limit: int) -> None:
-        await self.set_async("text_min_limit", limit, save=True)
-        
-    def set_cooldown(self, cooldown: int) -> None:
-        self.set("cooldown", cooldown, save=True)
-
-    async def set_cooldown_async(self, cooldown: int) -> None:
-        await self.set_async("cooldown", cooldown, save=True)
-        
-    def set_allow_mixed(self, allow: bool) -> None:
-        self.set("allow_mixed", allow, save=True)
-
-    async def set_allow_mixed_async(self, allow: bool) -> None:
-        await self.set_async("allow_mixed", allow, save=True)
-        
-    def set_show_references(self, show: bool) -> None:
-        self.set("show_references", show, save=True)
-
-    async def set_show_references_async(self, show: bool) -> None:
-        await self.set_async("show_references", show, save=True)
-        
-    def set_api_gain(self, gain: float) -> None:
-        api = self.get("api", {}) or {}
-        api["gain"] = gain
-        self.set("api", api, save=True)
-
-    async def set_api_gain_async(self, gain: float) -> None:
-        api = self.get("api", {}) or {}
-        api["gain"] = gain
-        await self.set_async("api", api, save=True)
-        
-    def set_marker_enable(self, enable: bool) -> None:
-        emo_cfg = self.get("emotion", {}) or {}
-        marker_cfg = (emo_cfg.get("marker") or {}) if isinstance(emo_cfg, dict) else {}
-        marker_cfg["enable"] = enable
-        emo_cfg["marker"] = marker_cfg
-        self.set("emotion", emo_cfg, save=True)
-
-    async def set_marker_enable_async(self, enable: bool) -> None:
-        emo_cfg = self.get("emotion", {}) or {}
-        marker_cfg = (emo_cfg.get("marker") or {}) if isinstance(emo_cfg, dict) else {}
-        marker_cfg["enable"] = enable
-        emo_cfg["marker"] = marker_cfg
-        await self.set_async("emotion", emo_cfg, save=True)
-
-    def get_text_voice_default(self) -> bool:
-        """获取文字+语音同时输出的默认值。"""
-        return bool(self.get("text_voice_default", False))
-    
-    # ==================== 分段 TTS 配置 ====================
-    
     def get_segmented_tts_config(self) -> Dict[str, Any]:
-        """获取分段 TTS 配置。"""
         return self.get("segmented_tts", {}) or {}
-    
+
     def is_segmented_tts_enabled(self) -> bool:
-        """检查是否启用分段 TTS。"""
-        cfg = self.get_segmented_tts_config()
-        return bool(cfg.get("enable", False))
-    
+        return bool(self.get_segmented_tts_config().get("enable", False))
+
     def get_segmented_tts_interval_mode(self) -> str:
-        """
-        获取分段间隔模式。
-        
-        Returns:
-            "fixed" 或 "adaptive"
-        """
-        cfg = self.get_segmented_tts_config()
-        mode = cfg.get("interval_mode", "fixed")
-        if mode not in ("fixed", "adaptive"):
-            return "fixed"
-        return mode
-    
+        mode = str(self.get_segmented_tts_config().get("interval_mode", "fixed"))
+        return mode if mode in ("fixed", "adaptive") else "fixed"
+
     def get_segmented_tts_fixed_interval(self) -> float:
-        """
-        获取固定间隔时间（秒）。
-        
-        Returns:
-            固定间隔时间，默认 1.5 秒
-        """
-        cfg = self.get_segmented_tts_config()
-        return float(cfg.get("fixed_interval", 1.5))
-    
+        return _safe_float(self.get_segmented_tts_config().get("fixed_interval"), 1.5)
+
     def get_segmented_tts_adaptive_buffer(self) -> float:
-        """
-        获取自适应模式下的缓冲时间（秒）。
-        
-        Returns:
-            缓冲时间，默认 0.5 秒
-        """
-        cfg = self.get_segmented_tts_config()
-        return float(cfg.get("adaptive_buffer", 0.5))
-    
+        return _safe_float(self.get_segmented_tts_config().get("adaptive_buffer"), 0.5)
+
     def get_segmented_tts_max_segments(self) -> int:
-        """
-        获取最大分段数量。
-        
-        Returns:
-            最大分段数，默认 10
-        """
-        cfg = self.get_segmented_tts_config()
-        return int(cfg.get("max_segments", 10))
-    
+        return _safe_int(self.get_segmented_tts_config().get("max_segments"), 10)
+
     def get_segmented_tts_min_segment_chars(self) -> int:
-        """
-        获取触发分段的最小字符数。
-        
-        Returns:
-            最小字符数，默认 50
-        """
-        cfg = self.get_segmented_tts_config()
-        return int(cfg.get("min_segment_chars", 50))
-    
+        return _safe_int(self.get_segmented_tts_config().get("min_segment_chars"), 50)
+
     def get_segmented_tts_split_pattern(self) -> str:
-        """
-        获取分段正则表达式。
-        
-        Returns:
-            分段正则，默认按句号、问号、感叹号、换行分割
-        """
-        cfg = self.get_segmented_tts_config()
-        return str(cfg.get("split_pattern", r"[。？！?!\n…]+"))
-    
+        return str(self.get_segmented_tts_config().get("split_pattern", r"[。？！!?\n…]+"))
+
     def get_segmented_tts_min_segment_length(self) -> int:
-        """
-        获取每个分段的最少字符数。
-        
-        低于此值的分段会与相邻分段合并，避免拟声词（如"咦！"）
-        单独成段导致语音过短听不清。
-        
-        Returns:
-            最少字符数，默认 5
-        """
-        cfg = self.get_segmented_tts_config()
-        return int(cfg.get("min_segment_length", DEFAULT_SEGMENTED_MIN_SEGMENT_LENGTH))
-    
-    def set_segmented_tts_enabled(self, enable: bool) -> None:
-        """设置分段 TTS 启用状态（同步）。"""
-        cfg = self.get_segmented_tts_config()
-        cfg["enable"] = enable
-        self.set("segmented_tts", cfg, save=True)
-    
-    async def set_segmented_tts_enabled_async(self, enable: bool) -> None:
-        """设置分段 TTS 启用状态（异步）。"""
-        cfg = self.get_segmented_tts_config()
-        cfg["enable"] = enable
-        await self.set_async("segmented_tts", cfg, save=True)
-    
-    def set_segmented_tts_interval_mode(self, mode: str) -> None:
-        """设置分段间隔模式（同步）。"""
-        if mode not in ("fixed", "adaptive"):
-            mode = "fixed"
-        cfg = self.get_segmented_tts_config()
-        cfg["interval_mode"] = mode
-        self.set("segmented_tts", cfg, save=True)
-    
-    async def set_segmented_tts_interval_mode_async(self, mode: str) -> None:
-        """设置分段间隔模式（异步）。"""
-        if mode not in ("fixed", "adaptive"):
-            mode = "fixed"
-        cfg = self.get_segmented_tts_config()
-        cfg["interval_mode"] = mode
-        await self.set_async("segmented_tts", cfg, save=True)
-    
-    def set_segmented_tts_fixed_interval(self, interval: float) -> None:
-        """设置固定间隔时间（同步）。"""
-        cfg = self.get_segmented_tts_config()
-        cfg["fixed_interval"] = max(0.5, float(interval))
-        self.set("segmented_tts", cfg, save=True)
-    
-    async def set_segmented_tts_fixed_interval_async(self, interval: float) -> None:
-        """设置固定间隔时间（异步）。"""
-        cfg = self.get_segmented_tts_config()
-        cfg["fixed_interval"] = max(0.5, float(interval))
-        await self.set_async("segmented_tts", cfg, save=True)
+        return _safe_int(
+            self.get_segmented_tts_config().get("min_segment_length"),
+            DEFAULT_SEGMENTED_MIN_SEGMENT_LENGTH,
+        )
