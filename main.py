@@ -63,6 +63,7 @@ from .utils.audio import ensure_dir, cleanup_dir
 from .utils.extract import CodeAndLinkExtractor, ProcessedText
 
 logger = logging.getLogger(__name__)
+VOICE_ONLY_SUPPRESSION_TTL_SECONDS = 120
 
 
 @register(PLUGIN_ID, PLUGIN_NAME, PLUGIN_DESC, PLUGIN_VERSION)
@@ -344,6 +345,10 @@ class TTSEmotionRouter(Star):
 
     async def _cleanup_stale_sessions(self) -> None:
         now = time.time()
+        for sid, state in self._session_state.items():
+            if state.clear_next_llm_plain_text_suppression_if_expired(now):
+                logger.info("voice-only suppression cleanup sid=%s reason=session_stale_scan", sid)
+
         stale_sessions = {
             sid
             for sid, state in self._session_state.items()
@@ -433,13 +438,24 @@ class TTSEmotionRouter(Star):
             st.set_assistant_text(send_text)
         return True, chain, "ok"
 
-    async def _send_manual_tts(self, event: AstrMessageEvent, text: str) -> str:
+    async def _send_manual_tts(
+        self,
+        event: AstrMessageEvent,
+        text: str,
+        *,
+        suppress_next_llm_plain_text: bool = False,
+    ) -> str:
         ok, chain, msg = await self._build_manual_tts_chain(event, text)
         if not ok:
             return msg
 
         try:
             await event.send(event.chain_result(chain))
+            if suppress_next_llm_plain_text:
+                sid = self._get_umo(event)
+                st = self._get_session_state(sid)
+                st.mark_next_llm_plain_text_suppressed(ttl_seconds=VOICE_ONLY_SUPPRESSION_TTL_SECONDS)
+                logger.info("voice-only suppression set sid=%s ttl=%ss", sid, VOICE_ONLY_SUPPRESSION_TTL_SECONDS)
             return "语音已发送。"
         except Exception as e:
             logging.error("manual tts send failed: %s", e)
@@ -560,13 +576,29 @@ class TTSEmotionRouter(Star):
             except Exception:
                 is_llm_response = getattr(result, "result_content_type", None) == ResultContentType.LLM_RESULT
 
-            if not is_llm_response or not result.chain:
+            if not is_llm_response:
                 return
+            if not hasattr(result, "chain") or result.chain is None:
+                result.chain = []
         except Exception as e:
             logging.warning("inspect response failed: %s", e)
             return
 
         umo = self._get_umo(event)
+        st = self._session_state.get(umo)
+        if st:
+            now_ts = time.time()
+            if st.clear_next_llm_plain_text_suppression_if_expired(now_ts):
+                logger.info("voice-only suppression cleanup sid=%s reason=decorating_expired", umo)
+            elif st.consume_next_llm_plain_text_suppression(now_ts):
+                plain_removed = sum(1 for comp in result.chain if isinstance(comp, Plain))
+                result.chain = [comp for comp in result.chain if not isinstance(comp, Plain)]
+                logger.info("voice-only suppression consumed sid=%s plain_removed=%d", umo, plain_removed)
+                return
+
+        if not result.chain:
+            return
+
         if not self.config.is_voice_output_enabled_for_umo(umo):
             return
 
@@ -817,11 +849,24 @@ class TTSEmotionRouter(Star):
         async def after_message_sent(self, event: AstrMessageEvent):
             try:
                 result = event.get_result()
-                if not result or not getattr(result, "chain", None):
+                if not result:
                     return
 
-                if any(isinstance(c, Record) for c in result.chain):
+                chain = getattr(result, "chain", None) or []
+                if any(isinstance(c, Record) for c in chain):
                     await self._ensure_history_saved(event)
+
+                try:
+                    is_llm_response = result.is_llm_result()
+                except Exception:
+                    is_llm_response = getattr(result, "result_content_type", None) == ResultContentType.LLM_RESULT
+
+                umo = self._get_umo(event)
+                st = self._session_state.get(umo)
+                if st and st.clear_next_llm_plain_text_suppression_if_expired():
+                    logger.info("voice-only suppression cleanup sid=%s reason=after_message_sent_expired", umo)
+                if st and is_llm_response and st.clear_next_llm_plain_text_suppression():
+                    logger.info("voice-only suppression cleanup sid=%s reason=after_message_sent", umo)
             except Exception as e:
                 logging.error("after_message_sent error: %s", e)
 
@@ -933,4 +978,4 @@ class TTSEmotionRouter(Star):
             content = (text or "").strip()
             if not content:
                 return "文本为空"
-            return await self._send_manual_tts(event, content)
+            return await self._send_manual_tts(event, content, suppress_next_llm_plain_text=True)

@@ -7,7 +7,7 @@ TTS Emotion Router - Session State
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, Dict
 import time
 
@@ -33,6 +33,8 @@ class SessionState:
             - None: 跟随全局设置
             - True: 会话级开启
             - False: 会话级关闭
+        suppress_next_llm_plain_text: 是否抑制下一次 LLM 纯文本输出（一次性）
+        suppress_next_llm_plain_text_until: 抑制失效时间戳（0 表示无 TTL）
     """
     last_ts: float = 0.0
     pending_emotion: Optional[str] = None
@@ -44,6 +46,8 @@ class SessionState:
     last_assistant_text_time: float = 0.0
     assistant_text: Optional[str] = None
     text_voice_enabled: Optional[bool] = None
+    suppress_next_llm_plain_text: bool = False
+    suppress_next_llm_plain_text_until: float = 0.0
     
     def update_tts_time(self) -> None:
         """更新最后 TTS 生成时间戳。"""
@@ -60,6 +64,68 @@ class SessionState:
         """设置最近的助手文本。"""
         self.last_assistant_text = text.strip() if text else None
         self.last_assistant_text_time = time.time()
+
+    def mark_next_llm_plain_text_suppressed(self, ttl_seconds: Optional[float] = None) -> None:
+        """
+        标记下一次 LLM 纯文本输出应被抑制。
+
+        Args:
+            ttl_seconds: 可选失效时间（秒）；<=0 或 None 表示不设置 TTL
+        """
+        self.suppress_next_llm_plain_text = True
+        if ttl_seconds and ttl_seconds > 0:
+            self.suppress_next_llm_plain_text_until = time.time() + float(ttl_seconds)
+        else:
+            self.suppress_next_llm_plain_text_until = 0.0
+
+    def clear_next_llm_plain_text_suppression(self) -> bool:
+        """
+        清理下一次 LLM 纯文本输出抑制状态。
+
+        Returns:
+            如果状态有变更则返回 True
+        """
+        changed = self.suppress_next_llm_plain_text or self.suppress_next_llm_plain_text_until > 0
+        self.suppress_next_llm_plain_text = False
+        self.suppress_next_llm_plain_text_until = 0.0
+        return changed
+
+    def clear_next_llm_plain_text_suppression_if_expired(self, now: Optional[float] = None) -> bool:
+        """
+        若抑制状态已过期则清理。
+
+        Args:
+            now: 当前时间戳；为空则使用 time.time()
+
+        Returns:
+            若发生清理返回 True
+        """
+        if not self.suppress_next_llm_plain_text:
+            return False
+        if self.suppress_next_llm_plain_text_until <= 0:
+            return False
+
+        now_ts = time.time() if now is None else now
+        if now_ts < self.suppress_next_llm_plain_text_until:
+            return False
+        return self.clear_next_llm_plain_text_suppression()
+
+    def consume_next_llm_plain_text_suppression(self, now: Optional[float] = None) -> bool:
+        """
+        消费一次下一次 LLM 纯文本输出抑制状态。
+
+        Args:
+            now: 当前时间戳；为空则使用 time.time()
+
+        Returns:
+            若成功消费返回 True
+        """
+        if not self.suppress_next_llm_plain_text:
+            return False
+        if self.clear_next_llm_plain_text_suppression_if_expired(now):
+            return False
+        self.clear_next_llm_plain_text_suppression()
+        return True
     
     def consume_pending_emotion(self) -> Optional[str]:
         """
