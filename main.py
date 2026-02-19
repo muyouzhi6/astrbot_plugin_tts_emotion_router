@@ -978,4 +978,12 @@ class TTSEmotionRouter(Star):
             content = (text or "").strip()
             if not content:
                 return "文本为空"
-            return await self._send_manual_tts(event, content, suppress_next_llm_plain_text=True)
+
+            send_result = await self._send_manual_tts(event, content, suppress_next_llm_plain_text=True)
+            if send_result == "语音已发送。":
+                # 关键：工具已完成语音发送后，终止当前事件后续文本输出
+                # 这样可避免 LLM 在工具调用后继续长篇打字
+                event.stop_event()
+                return None
+
+            return send_result

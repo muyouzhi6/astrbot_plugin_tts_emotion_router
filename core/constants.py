@@ -9,7 +9,7 @@ import re
 PLUGIN_ID = "astrbot_plugin_tts_emotion_router"
 PLUGIN_NAME = "TTS 情绪路由"
 PLUGIN_DESC = "支持情绪路由、多服务商与会话策略的 TTS 插件。"
-PLUGIN_VERSION = "3.0.1"
+PLUGIN_VERSION = "3.0.2"
 PLUGIN_AUTHOR = "muyouzhi6"
 
 # Paths
