@@ -24,7 +24,10 @@ from .constants import (
     DEFAULT_FEATURE_MODE,
     DEFAULT_MINIMAX_BITRATE,
     DEFAULT_MINIMAX_CHANNEL,
+    DEFAULT_MINIMAX_LANGUAGE_BOOST,
     DEFAULT_MINIMAX_MODEL,
+    DEFAULT_MINIMAX_OUTPUT_FORMAT,
+    DEFAULT_MINIMAX_PROXY,
     DEFAULT_MINIMAX_PITCH,
     DEFAULT_MINIMAX_URL,
     DEFAULT_MINIMAX_VOICE_ID,
@@ -232,8 +235,14 @@ class ConfigManager:
             "sample_rate": 32000,
             "bitrate": DEFAULT_MINIMAX_BITRATE,
             "channel": DEFAULT_MINIMAX_CHANNEL,
+            "output_format": DEFAULT_MINIMAX_OUTPUT_FORMAT,
+            "language_boost": DEFAULT_MINIMAX_LANGUAGE_BOOST,
+            "proxy": DEFAULT_MINIMAX_PROXY,
+            "voice_modify": {},
+            "timbre_weights": [],
             "subtitle_enable": False,
             "pronunciation_dict": {},
+            "aigc_watermark": False,
         }
         for k, v in mm_defaults.items():
             if k not in mm:
@@ -257,6 +266,10 @@ class ConfigManager:
             marker["enable"] = True
         if "tag" not in marker:
             marker["tag"] = DEFAULT_EMO_MARKER_TAG
+        if "prompt_hint" not in marker:
+            marker["prompt_hint"] = (
+                "请在回复开头添加 [EMO:happy|sad|angry|neutral]，该标记仅供系统解析，不对用户显示。"
+            )
         route["marker"] = marker
         self._config["emotion_route"] = route
 
@@ -391,6 +404,9 @@ class ConfigManager:
         if provider == "minimax":
             mm = engine.get("minimax", {}) or {}
             audio_format = str(mm.get("audio_format", DEFAULT_API_FORMAT)).lower()
+            timbre_weights = copy.deepcopy(
+                mm.get("timber_weights", mm.get("timbre_weights", [])) or []
+            )
             return {
                 "provider": "minimax",
                 "url": str(mm.get("url", DEFAULT_MINIMAX_URL)),
@@ -405,8 +421,15 @@ class ConfigManager:
                 "sample_rate": _safe_int(mm.get("sample_rate"), 32000),
                 "bitrate": _safe_int(mm.get("bitrate"), DEFAULT_MINIMAX_BITRATE),
                 "channel": _safe_int(mm.get("channel"), DEFAULT_MINIMAX_CHANNEL),
+                "output_format": str(mm.get("output_format", DEFAULT_MINIMAX_OUTPUT_FORMAT)).strip().lower() or DEFAULT_MINIMAX_OUTPUT_FORMAT,
+                "language_boost": str(mm.get("language_boost", DEFAULT_MINIMAX_LANGUAGE_BOOST) or "").strip(),
+                "proxy": str(mm.get("proxy", DEFAULT_MINIMAX_PROXY) or "").strip(),
+                "voice_modify": copy.deepcopy(mm.get("voice_modify", {}) or {}),
+                "timber_weights": timbre_weights,
+                "timbre_weights": copy.deepcopy(timbre_weights),
                 "subtitle_enable": bool(mm.get("subtitle_enable", False)),
                 "pronunciation_dict": copy.deepcopy(mm.get("pronunciation_dict", {}) or {}),
+                "aigc_watermark": bool(mm.get("aigc_watermark", False)),
                 "timeout": timeout,
                 "max_retries": max_retries,
                 "default_voice": str(mm.get("voice_id", DEFAULT_MINIMAX_VOICE_ID)),
@@ -459,6 +482,9 @@ class ConfigManager:
     def get_marker_tag(self) -> str:
         return str(self.get_marker_config().get("tag", DEFAULT_EMO_MARKER_TAG))
 
+    def get_marker_prompt_hint(self) -> str:
+        return str(self.get_marker_config().get("prompt_hint", "") or "").strip()
+
     def get_emotion_keywords(self) -> Dict[str, List[str]]:
         route = self.get("emotion_route", {}) or {}
         return dict(route.get("keywords", {}) or {})
@@ -502,6 +528,13 @@ class ConfigManager:
 
     async def set_voice_output_enable_async(self, enable: bool) -> None:
         await self.set_feature_policy_async(FEATURE_VOICE_OUTPUT, {"enable": bool(enable)})
+
+    async def set_marker_enable_async(self, enable: bool) -> None:
+        route = self.get("emotion_route", {}) or {}
+        marker = route.get("marker", {}) or {}
+        marker["enable"] = bool(enable)
+        route["marker"] = marker
+        await self.set_and_save("emotion_route", route)
 
     async def set_prob_async(self, prob: float) -> None:
         probability = self.get("probability", {}) or {}

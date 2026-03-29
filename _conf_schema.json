@@ -12,7 +12,10 @@
       "provider": {
         "type": "string",
         "description": "语音服务商",
-        "options": ["siliconflow", "minimax"],
+        "options": [
+          "siliconflow",
+          "minimax"
+        ],
         "default": "siliconflow"
       },
       "timeout": {
@@ -50,7 +53,12 @@
           "format": {
             "type": "string",
             "description": "音频格式",
-            "options": ["mp3", "wav", "opus", "pcm"],
+            "options": [
+              "mp3",
+              "wav",
+              "opus",
+              "pcm"
+            ],
             "default": "mp3"
           },
           "speed": {
@@ -125,7 +133,12 @@
           "audio_format": {
             "type": "string",
             "description": "音频格式",
-            "options": ["mp3", "wav", "pcm"],
+            "options": [
+              "mp3",
+              "wav",
+              "pcm",
+              "flac"
+            ],
             "default": "mp3"
           },
           "sample_rate": {
@@ -143,11 +156,51 @@
             "description": "声道数",
             "default": 1
           },
+          "output_format": {
+            "type": "string",
+            "description": "音频返回方式",
+            "options": [
+              "hex",
+              "url"
+            ],
+            "default": "hex"
+          },
+          "language_boost": {
+            "type": "string",
+            "description": "语言增强提示（按 MiniMax 文档填写）",
+            "default": ""
+          },
+          "proxy": {
+            "type": "string",
+            "description": "可选 HTTP/HTTPS 代理地址",
+            "default": "",
+            "hint": "例如 http://127.0.0.1:7890，不填则直连。"
+          },
+          "voice_modify": {
+            "type": "object",
+            "description": "音色微调参数（按 MiniMax 文档填写）",
+            "items": {},
+            "default": {}
+          },
+          "timbre_weights": {
+            "type": "list",
+            "description": "混合音色权重（映射官方 timber_weights）",
+            "items": {
+              "type": "object",
+              "items": {}
+            },
+            "default": []
+          },
           "pronunciation_dict": {
             "type": "object",
             "description": "发音词典（可选，按 MiniMax 文档填写）",
             "items": {},
             "default": {}
+          },
+          "aigc_watermark": {
+            "type": "bool",
+            "description": "是否启用 AIGC 水印",
+            "default": false
           },
           "subtitle_enable": {
             "type": "bool",
@@ -174,7 +227,10 @@
           "mode": {
             "type": "string",
             "description": "名单模式",
-            "options": ["blacklist", "whitelist"],
+            "options": [
+              "blacklist",
+              "whitelist"
+            ],
             "default": "blacklist"
           },
           "enabled_umos": {
@@ -213,7 +269,10 @@
           "mode": {
             "type": "string",
             "description": "名单模式",
-            "options": ["blacklist", "whitelist"],
+            "options": [
+              "blacklist",
+              "whitelist"
+            ],
             "default": "whitelist"
           },
           "enabled_umos": {
@@ -252,7 +311,10 @@
           "mode": {
             "type": "string",
             "description": "名单模式",
-            "options": ["blacklist", "whitelist"],
+            "options": [
+              "blacklist",
+              "whitelist"
+            ],
             "default": "blacklist"
           },
           "enabled_umos": {
@@ -291,7 +353,10 @@
           "mode": {
             "type": "string",
             "description": "名单模式",
-            "options": ["blacklist", "whitelist"],
+            "options": [
+              "blacklist",
+              "whitelist"
+            ],
             "default": "blacklist"
           },
           "enabled_umos": {
@@ -368,7 +433,10 @@
       "interval_mode": {
         "type": "string",
         "description": "分段发送间隔模式",
-        "options": ["fixed", "adaptive"],
+        "options": [
+          "fixed",
+          "adaptive"
+        ],
         "default": "fixed"
       },
       "fixed_interval": {
@@ -449,7 +517,11 @@
             "items": {
               "type": "string"
             },
-            "default": ["happy", "great", "lol"]
+            "default": [
+              "happy",
+              "great",
+              "lol"
+            ]
           },
           "sad": {
             "type": "list",
@@ -457,7 +529,11 @@
             "items": {
               "type": "string"
             },
-            "default": ["sad", "sorry", "cry"]
+            "default": [
+              "sad",
+              "sorry",
+              "cry"
+            ]
           },
           "angry": {
             "type": "list",
@@ -465,7 +541,11 @@
             "items": {
               "type": "string"
             },
-            "default": ["angry", "mad", "annoyed"]
+            "default": [
+              "angry",
+              "mad",
+              "annoyed"
+            ]
           }
         }
       },

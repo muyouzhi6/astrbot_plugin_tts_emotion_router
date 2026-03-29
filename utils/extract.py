@@ -285,7 +285,21 @@ class CodeAndLinkExtractor:
             code=match_content.strip('`').strip()
         )
 
-    def process_text(self, text: str) -> ProcessedText:
+    def _normalize_speak_text(self, text: str, *, preserve_linebreaks: bool = False) -> str:
+        """规范化用于 TTS 的文本。"""
+        if not text:
+            return ""
+
+        if not preserve_linebreaks:
+            return re.sub(r"\s+", " ", text).strip()
+
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        text = re.sub(r"[ \t\f\v]+", " ", text)
+        text = re.sub(r" *\n *", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    def process_text(self, text: str, *, preserve_linebreaks: bool = False) -> ProcessedText:
         """
         处理输入文本，分离出用于发送的文本和用于语音合成的文本。
         
@@ -415,7 +429,10 @@ class CodeAndLinkExtractor:
         speak_text = ''.join(speak_text_parts)
         
         # 清理多余空格
-        speak_text = re.sub(r'\s+', ' ', speak_text).strip()
+        speak_text = self._normalize_speak_text(
+            speak_text,
+            preserve_linebreaks=preserve_linebreaks,
+        )
         
         return ProcessedText(
             clean_text=clean_text,

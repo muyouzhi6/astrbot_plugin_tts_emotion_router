@@ -44,7 +44,7 @@ EMOTION_SYNONYMS: Dict[str, Set[str]] = {
     "happy": {"happy", "joy", "joyful", "cheerful", "excited", "positive"},
     "sad": {"sad", "sorrow", "depressed", "down", "unhappy", "upset"},
     "angry": {"angry", "mad", "furious", "annoyed", "irritated", "rage"},
-    "neutral": {"neutral", "calm", "normal", "objective", "ok", "fine"},
+    "neutral": {"neutral", "calm", "normal", "objective", "ok", "fine", "confused"},
 }
 
 EMOTION_PREFERENCE_MAP: Dict[str, str] = {
@@ -77,6 +77,32 @@ DEFAULT_MINIMAX_VOL: float = 1.0
 DEFAULT_MINIMAX_PITCH: int = 0
 DEFAULT_MINIMAX_BITRATE: int = 128000
 DEFAULT_MINIMAX_CHANNEL: int = 1
+DEFAULT_MINIMAX_OUTPUT_FORMAT: str = "hex"
+DEFAULT_MINIMAX_LANGUAGE_BOOST: str = ""
+DEFAULT_MINIMAX_PROXY: str = ""
+
+MINIMAX_EXPRESSIVE_MODELS: Tuple[str, ...] = ("speech-2.8-hd", "speech-2.8-turbo")
+MINIMAX_EXPRESSIVE_TAGS: Tuple[str, ...] = (
+    "laughs",
+    "chuckle",
+    "coughs",
+    "clear-throat",
+    "groans",
+    "breath",
+    "pant",
+    "inhale",
+    "exhale",
+    "gasps",
+    "sniffs",
+    "sighs",
+    "snorts",
+    "burps",
+    "lip-smacking",
+    "humming",
+    "hissing",
+    "emm",
+    "sneezes",
+)
 
 DEFAULT_FEATURE_MODE: str = "blacklist"
 DEFAULT_API_FORMAT: str = "mp3"

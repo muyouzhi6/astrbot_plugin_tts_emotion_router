@@ -71,19 +71,19 @@ class EmotionMarkerProcessor:
             
             # 头部 token（英文任意标签）：如 [EMO:confused]
             self._head_anylabel_re: Optional[Pattern] = re.compile(
-                rf"^[\s\ufeff]*[\[\(【]\s*{escaped_tag}\s*[:\uff1a-]\s*(?P<raw>[a-z]+)\s*[\]\)】]",
+                rf"^[\s\ufeff]*[\[\(【]\s*{escaped_tag}\s*[:\uff1a-]\s*(?P<raw>[a-z][a-z_-]*)\s*[\]\)】]",
                 re.I
             )
 
             # 激进清理 - 行首/段首（保留换行）
             self._marker_head_visible_re: Optional[Pattern] = re.compile(
-                rf'(^|\n)\s*[\[\(【]\s*{escaped_tag}\s*[:：-]\s*(happy|sad|angry|neutral)\s*[\]\)】]\s*',
+                rf'(^|\n)\s*[\[\(【]\s*{escaped_tag}\s*(?:[:：-]\s*[^\]\)】\n]+)?\s*[\]\)】]\s*',
                 re.I
             )
             
             # 激进清理 - 句中：直接全局删除
             self._marker_mid_visible_re: Optional[Pattern] = re.compile(
-                rf'[\[\(【]\s*{escaped_tag}\s*[:：-]\s*(happy|sad|angry|neutral)\s*[\]\)】]',
+                rf'[\[\(【]\s*{escaped_tag}\s*(?:[:：-]\s*[^\]\)】\n]+)?\s*[\]\)】]',
                 re.I
             )
 

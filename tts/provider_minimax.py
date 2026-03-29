@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import aiohttp
 
@@ -31,8 +31,14 @@ class MiniMaxTTS:
         sample_rate: int = 32000,
         bitrate: int = 128000,
         channel: int = 1,
+        output_format: str = "hex",
+        language_boost: str = "",
+        proxy: str = "",
+        voice_modify: Optional[dict] = None,
+        timber_weights: Optional[list] = None,
         subtitle_enable: bool = False,
         pronunciation_dict: Optional[dict] = None,
+        aigc_watermark: bool = False,
         max_retries: int = 2,
         timeout: int = 30,
     ):
@@ -48,10 +54,18 @@ class MiniMaxTTS:
         self.sample_rate = int(sample_rate)
         self.bitrate = int(bitrate)
         self.channel = int(channel)
+        self.output_format = str(output_format or "hex").strip().lower() or "hex"
+        self.language_boost = str(language_boost or "").strip()
+        self.proxy = str(proxy or "").strip() or None
+        self.voice_modify = copy.deepcopy(voice_modify or {})
+        self.timber_weights = copy.deepcopy(timber_weights or [])
         self.subtitle_enable = bool(subtitle_enable)
         self.pronunciation_dict = copy.deepcopy(pronunciation_dict or {})
+        self.aigc_watermark = bool(aigc_watermark)
         self.max_retries = max(0, int(max_retries))
         self.timeout = max(5, int(timeout))
+        self.transport_mode = "sync_http"
+        self.last_response_meta: Optional[dict[str, Any]] = None
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def close(self):
@@ -88,16 +102,76 @@ class MiniMaxTTS:
         await self._ensure_session()
         try:
             assert self._session is not None
-            async with self._session.get(url) as r:
-                if r.status != 200:
+            async with self._session.get(url, proxy=self.proxy) as response:
+                if response.status != 200:
                     return False
-                content = await r.read()
+                content = await response.read()
                 if not content:
                     return False
                 await self._write_bytes(out_path, content)
                 return True
         except Exception:
             return False
+
+    def _build_sync_http_payload(
+        self,
+        text: str,
+        *,
+        voice: str,
+        speed: float,
+        emotion: str,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "text": text,
+            "stream": False,
+            "voice_setting": {
+                "voice_id": voice,
+                "speed": speed,
+                "vol": self.vol,
+                "pitch": self.pitch,
+                "emotion": emotion,
+            },
+            "audio_setting": {
+                "sample_rate": self.sample_rate,
+                "bitrate": self.bitrate,
+                "format": self.format,
+                "channel": self.channel,
+            },
+            "output_format": self.output_format,
+            "subtitle_enable": self.subtitle_enable,
+            "aigc_watermark": self.aigc_watermark,
+        }
+
+        if self.language_boost:
+            payload["language_boost"] = self.language_boost
+        if self.voice_modify:
+            payload["voice_modify"] = copy.deepcopy(self.voice_modify)
+        if self.timber_weights:
+            payload["timber_weights"] = copy.deepcopy(self.timber_weights)
+        if self.pronunciation_dict:
+            payload["pronunciation_dict"] = copy.deepcopy(self.pronunciation_dict)
+
+        return payload
+
+    def _extract_response_meta(self, data: dict[str, Any]) -> dict[str, Any]:
+        body = data.get("data", {}) or {}
+        extra_info = body.get("extra_info")
+        if not isinstance(extra_info, dict):
+            extra_info = data.get("extra_info") if isinstance(data.get("extra_info"), dict) else {}
+
+        return {
+            "status_code": (data.get("base_resp") or {}).get("status_code"),
+            "status_msg": (data.get("base_resp") or {}).get("status_msg"),
+            "usage_characters": extra_info.get("usage_characters"),
+            "audio_length": extra_info.get("audio_length"),
+            "invisible_character_ratio": extra_info.get("invisible_character_ratio"),
+        }
+
+    def _log_response_meta(self, meta: dict[str, Any]) -> None:
+        compact_meta = {key: value for key, value in meta.items() if value not in (None, "", [], {})}
+        if compact_meta:
+            logger.info("MiniMaxTTS response meta: %s", compact_meta)
 
     async def synth(
         self,
@@ -132,6 +206,14 @@ class MiniMaxTTS:
                     "ch": self.channel,
                     "vol": self.vol,
                     "pitch": self.pitch,
+                    "output_format": self.output_format,
+                    "language_boost": self.language_boost,
+                    "proxy": self.proxy,
+                    "voice_modify": self.voice_modify,
+                    "timber_weights": self.timber_weights,
+                    "pronunciation_dict": self.pronunciation_dict,
+                    "subtitle_enable": self.subtitle_enable,
+                    "aigc_watermark": self.aigc_watermark,
                 },
                 ensure_ascii=False,
             ).encode("utf-8")
@@ -141,28 +223,16 @@ class MiniMaxTTS:
         if out_path.exists() and out_path.stat().st_size > 0:
             return out_path
 
-        payload = {
-            "model": self.model,
-            "text": text,
-            "stream": False,
-            "voice_setting": {
-                "voice_id": effective_voice,
-                "speed": effective_speed,
-                "vol": self.vol,
-                "pitch": self.pitch,
-                "emotion": effective_emotion,
-            },
-            "audio_setting": {
-                "sample_rate": self.sample_rate,
-                "bitrate": self.bitrate,
-                "format": self.format,
-                "channel": self.channel,
-            },
-            "subtitle_enable": self.subtitle_enable,
-        }
-        if self.pronunciation_dict:
-            payload["pronunciation_dict"] = copy.deepcopy(self.pronunciation_dict)
+        if self.transport_mode != "sync_http":
+            logger.error("MiniMaxTTS transport not implemented: %s", self.transport_mode)
+            return None
 
+        payload = self._build_sync_http_payload(
+            text,
+            voice=effective_voice,
+            speed=effective_speed,
+            emotion=effective_emotion,
+        )
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -179,6 +249,7 @@ class MiniMaxTTS:
                     self.api_url,
                     headers=headers,
                     json=payload,
+                    proxy=self.proxy,
                 ) as resp:
                     content_type = (resp.headers.get("Content-Type") or "").lower()
                     if 200 <= resp.status < 300:
@@ -190,12 +261,21 @@ class MiniMaxTTS:
                             await self._write_bytes(out_path, raw)
                         else:
                             data = await resp.json(content_type=None)
+                            meta = self._extract_response_meta(data)
+                            self.last_response_meta = meta
+                            self._log_response_meta(meta)
+
                             if (data.get("base_resp") or {}).get("status_code", 0) != 0:
                                 last_error = (data.get("base_resp") or {}).get("status_msg")
                                 break
 
                             body = data.get("data", {}) or {}
-                            audio_text = str(body.get("audio") or "").strip()
+                            audio_text = str(
+                                body.get("audio")
+                                or body.get("audio_hex")
+                                or body.get("audio_base64")
+                                or ""
+                            ).strip()
                             audio_file = str(body.get("audio_file") or "").strip()
 
                             if audio_text:

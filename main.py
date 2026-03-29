@@ -49,6 +49,8 @@ from .core.constants import (
     INFLIGHT_SIG_MAX_COUNT,
     DEFAULT_TEST_TEXT,
     HISTORY_WRITE_DELAY,
+    MINIMAX_EXPRESSIVE_MODELS,
+    MINIMAX_EXPRESSIVE_TAGS,
 )
 from .core.session import SessionState
 from .core.config import ConfigManager
@@ -60,7 +62,8 @@ from .emotion.classifier import HeuristicClassifier
 from .tts.provider_siliconflow import SiliconFlowTTS
 from .tts.provider_minimax import MiniMaxTTS
 from .utils.audio import ensure_dir, cleanup_dir
-from .utils.extract import CodeAndLinkExtractor, ProcessedText
+from .utils.extract import CodeAndLinkExtractor
+from .utils.text_sanitizer import PreparedSpeechText, SpeechTextSanitizer
 
 logger = logging.getLogger(__name__)
 VOICE_ONLY_SUPPRESSION_TTL_SECONDS = 120
@@ -153,8 +156,14 @@ class TTSEmotionRouter(Star):
                 sample_rate=api_cfg.get("sample_rate", 32000),
                 bitrate=api_cfg.get("bitrate", 128000),
                 channel=api_cfg.get("channel", 1),
+                output_format=api_cfg.get("output_format", "hex"),
+                language_boost=api_cfg.get("language_boost", ""),
+                proxy=api_cfg.get("proxy", ""),
+                voice_modify=api_cfg.get("voice_modify", {}),
+                timber_weights=api_cfg.get("timber_weights", api_cfg.get("timbre_weights", [])),
                 subtitle_enable=api_cfg.get("subtitle_enable", False),
                 pronunciation_dict=api_cfg.get("pronunciation_dict", {}),
+                aigc_watermark=api_cfg.get("aigc_watermark", False),
                 max_retries=api_cfg.get("max_retries", 2),
                 timeout=api_cfg.get("timeout", 30),
             )
@@ -176,7 +185,8 @@ class TTSEmotionRouter(Star):
         keys = (
             "provider", "url", "key", "model", "format", "speed", "gain", "sample_rate",
             "voice_id", "vol", "pitch", "emotion", "bitrate", "channel", "subtitle_enable",
-            "pronunciation_dict", "max_retries", "timeout",
+            "output_format", "language_boost", "proxy", "voice_modify", "timber_weights",
+            "pronunciation_dict", "aigc_watermark", "max_retries", "timeout",
         )
         return tuple((k, str(api_cfg.get(k))) for k in keys)
 
@@ -189,6 +199,10 @@ class TTSEmotionRouter(Star):
         self.marker_processor = EmotionMarkerProcessor(tag=marker_tag, enabled=self.emo_marker_enable)
 
         self.extractor = CodeAndLinkExtractor()
+        self.text_sanitizer = SpeechTextSanitizer(
+            marker_processor=self.marker_processor,
+            extractor=self.extractor,
+        )
         self.tts_processor = TTSProcessor(
             tts_client=self.tts_client,
             voice_map=self.voice_map,
@@ -404,20 +418,105 @@ class TTSEmotionRouter(Star):
     def _strip_any_visible_markers(self, text: str) -> str:
         return self.marker_processor.strip_all_visible_markers(text)
 
-    def _prepare_text_for_tts(self, text: str) -> Tuple[str, str]:
-        text = self._normalize_text(text or "")
-        text, _ = self._strip_emo_head_many(text)
-        processed: ProcessedText = self.extractor.process_text(text)
-        tts_text = (processed.speak_text or "").strip()
-        send_text = (processed.clean_text or "").strip()
-        return tts_text, send_text
+    def _is_minimax_provider(self) -> bool:
+        return self.config.get_tts_provider() == "minimax"
+
+    def _current_tts_model(self) -> str:
+        api_cfg = self.config.get_api_config()
+        return str(api_cfg.get("model", "") or "").strip().lower()
+
+    def _supports_minimax_expressive_tags(self, model: Optional[str] = None) -> bool:
+        current_model = str(model or self._current_tts_model() or "").strip().lower()
+        return current_model in MINIMAX_EXPRESSIVE_MODELS
+
+    def _build_minimax_guidance_instruction(self) -> str:
+        expressive_supported = self._supports_minimax_expressive_tags()
+        lines = [
+            "以下规则只在回复预计会被转成语音时生效。",
+            "可用换行表示段落切换，换行要自然，不要为了凑格式乱分段。",
+            "如需停顿，只能在两段可发音文本之间插入 <#x#>，x 为秒数，可保留两位小数，不要连续使用多个停顿标记。",
+        ]
+
+        if expressive_supported:
+            tags = "、".join(f"({tag})" for tag in MINIMAX_EXPRESSIVE_TAGS)
+            lines.append(
+                f"仅在自然需要时可使用以下语气词标签：{tags}。不要堆砌，不要把标签当正文解释。"
+            )
+        else:
+            lines.append("当前模型不要输出 MiniMax 语气词标签，例如 (laughs)。")
+
+        lines.append("这些控制符只服务语音效果，输出后继续正常作答，不要解释这些控制符。")
+        return "\n".join(lines)
+
+    def _should_inject_minimax_prompt(self, event: AstrMessageEvent) -> bool:
+        if not self._is_minimax_provider():
+            return False
+        umo = self._get_umo(event)
+        return self.config.is_voice_output_enabled_for_umo(umo)
+
+    def _append_references_to_text(
+        self,
+        base_text: str,
+        *,
+        links: Optional[List[str]] = None,
+        codes: Optional[List[str]] = None,
+    ) -> str:
+        text = (base_text or "").strip()
+        if not self.show_references:
+            return text
+
+        extra_parts: List[str] = []
+        if links:
+            extra_parts.append("参考链接\n" + "\n".join(f"{i + 1}. {link}" for i, link in enumerate(links)))
+        if codes:
+            extra_parts.append("代码片段\n" + "\n".join(codes))
+
+        return "\n\n".join(part for part in [text, *extra_parts] if part)
+
+    def _build_display_result_chain(self, original_chain: List, display_text: str) -> List:
+        new_chain = []
+        if (display_text or "").strip():
+            new_chain.append(Plain(text=display_text.strip()))
+        for comp in original_chain:
+            if not isinstance(comp, Plain):
+                new_chain.append(comp)
+        return new_chain
+
+    def _build_fallback_result_chain(
+        self,
+        original_chain: List,
+        display_text: str,
+        *,
+        links: Optional[List[str]] = None,
+        codes: Optional[List[str]] = None,
+    ) -> List:
+        fallback_text = self._append_references_to_text(
+            display_text,
+            links=links,
+            codes=codes,
+        )
+        return self._build_display_result_chain(original_chain, fallback_text)
+
+    def _prepare_text_for_tts(self, text: str) -> PreparedSpeechText:
+        api_cfg = self.config.get_api_config()
+        return self.text_sanitizer.prepare(
+            text or "",
+            provider=str(api_cfg.get("provider", "") or ""),
+            model=str(api_cfg.get("model", "") or ""),
+        )
+
+    def _prepare_visible_text(self, text: str) -> str:
+        prepared = self._prepare_text_for_tts(text)
+        return (prepared.display_text or "").strip()
 
     async def _build_manual_tts_chain(
         self,
         event: AstrMessageEvent,
         text: str,
     ) -> Tuple[bool, List, str]:
-        tts_text, send_text = self._prepare_text_for_tts(text)
+        prepared = self._prepare_text_for_tts(text)
+        tts_text = (prepared.tts_text or "").strip()
+        send_text = (prepared.display_text or "").strip()
         if not tts_text:
             return False, [], "没有可用于语音合成的文本。"
 
@@ -465,15 +564,22 @@ class TTSEmotionRouter(Star):
 
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, request):
-        _ = event
-        if not self.emo_marker_enable:
-            return
-
         try:
+            if not self._should_inject_minimax_prompt(event):
+                return
+
             sp = getattr(request, "system_prompt", "") or ""
             pp = getattr(request, "prompt", "") or ""
-            if not self.marker_processor.is_marker_present(sp, pp):
-                request.system_prompt = (self.marker_processor.build_injection_instruction() + "\n" + sp).strip()
+            injected_parts: List[str] = []
+
+            if self.emo_marker_enable and not self.marker_processor.is_marker_present(sp, pp):
+                prompt_hint = self.config.get_marker_prompt_hint()
+                if prompt_hint:
+                    injected_parts.append(prompt_hint)
+                injected_parts.append(self.marker_processor.build_injection_instruction())
+
+            injected_parts.append(self._build_minimax_guidance_instruction())
+            request.system_prompt = "\n".join(part for part in [*injected_parts, sp] if part).strip()
         except Exception as e:
             logger.error("on_llm_request failed: %s", e)
 
@@ -522,21 +628,30 @@ class TTSEmotionRouter(Star):
         except Exception as e:
             logging.warning("strip result_chain failed: %s", e)
 
+        visible_text = (cached_text or "").strip()
+        if visible_text:
+            try:
+                prepared_visible_text = self._prepare_visible_text(visible_text)
+                if prepared_visible_text:
+                    visible_text = prepared_visible_text
+            except Exception as e:
+                logging.warning("prepare visible history text failed: %s", e)
+
         try:
             umo = self._get_umo(event)
             st = self._get_session_state(umo)
             if label in EMOTIONS:
                 st.pending_emotion = label
-            if cached_text and cached_text.strip():
-                st.set_assistant_text(cached_text.strip())
+            if visible_text:
+                st.set_assistant_text(visible_text)
         except Exception as e:
             logging.error("update session state failed: %s", e)
 
         try:
-            if cached_text and cached_text.strip():
-                ok = await self._append_assistant_text_to_history(event, cached_text.strip())
+            if visible_text:
+                ok = await self._append_assistant_text_to_history(event, visible_text)
                 if not ok:
-                    asyncio.create_task(self._delayed_history_write(event, cached_text.strip(), delay=HISTORY_WRITE_DELAY))
+                    asyncio.create_task(self._delayed_history_write(event, visible_text, delay=HISTORY_WRITE_DELAY))
         except Exception as e:
             logging.error("append history failed: %s", e)
 
@@ -599,9 +714,6 @@ class TTSEmotionRouter(Star):
         if not result.chain:
             return
 
-        if not self.config.is_voice_output_enabled_for_umo(umo):
-            return
-
         try:
             new_chain = []
             for comp in result.chain:
@@ -622,23 +734,27 @@ class TTSEmotionRouter(Star):
             return
 
         text = self._normalize_text(" ".join(text_parts))
-        text, _ = self._strip_emo_head_many(text)
+        prepared = self._prepare_text_for_tts(text)
+        tts_text = (prepared.tts_text or "").strip()
+        display_text = (prepared.display_text or "").strip()
+        send_text = self._append_references_to_text(
+            display_text,
+            links=prepared.links,
+            codes=prepared.codes,
+        )
+        display_chain = self._build_fallback_result_chain(
+            result.chain,
+            display_text,
+            links=prepared.links,
+            codes=prepared.codes,
+        )
 
-        processed: ProcessedText = self.extractor.process_text(text)
-        tts_text = (processed.speak_text or "").strip()
-        clean_text = (processed.clean_text or "").strip()
-        links = processed.links
-        codes = processed.codes
-
-        send_text = clean_text
-        if self.show_references:
-            if links:
-                send_text += "\n\n参考链接\n" + "\n".join(f"{i + 1}. {link}" for i, link in enumerate(links))
-            if codes:
-                send_text += "\n\n代码片段\n" + "\n".join(codes)
+        if not self.config.is_voice_output_enabled_for_umo(umo):
+            result.chain = display_chain
+            return
 
         if not tts_text:
-            result.chain = [Plain(text=send_text)]
+            result.chain = display_chain
             return
 
         st = self._get_session_state(umo)
@@ -652,12 +768,12 @@ class TTSEmotionRouter(Star):
             enable_probability=self.config.is_probability_output_enabled_for_umo(umo),
         )
         if not check_res.passed:
-            if "mixed content" in check_res.reason:
-                result.chain = [Plain(text=send_text)] + [c for c in result.chain if not isinstance(c, Plain)]
+            result.chain = display_chain
             return
 
         sig = self._build_inflight_sig(umo, tts_text)
         if sig in self._inflight_sigs:
+            result.chain = display_chain
             return
         self._inflight_sigs[sig] = time.time()
 
@@ -700,7 +816,7 @@ class TTSEmotionRouter(Star):
                 if send_text:
                     st.set_assistant_text(send_text)
             else:
-                result.chain = [Plain(text=send_text)]
+                result.chain = display_chain
         finally:
             self._inflight_sigs.pop(sig, None)
 
