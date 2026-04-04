@@ -1,5 +1,5 @@
 name: astrbot_plugin_tts_emotion_router
-author: muyouzhi6
+author: 木有知
 version: 3.1.3
 desc: "支持情绪路由、MiniMax/SiliconFlow、会话黑白名单策略与按需语音调用的 TTS 插件。"
 repo: https://github.com/muyouzhi6/astrbot_plugin_tts_emotion_router
