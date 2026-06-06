@@ -215,7 +215,7 @@ class TTSEmotionRouter(Star):
         api_cfg = self.config.get_api_config()
         keys = (
             "provider", "url", "key", "model", "format", "speed", "gain", "sample_rate",
-            "voice_id", "voice", "sing_voice", "overall_tone", "timbre_positioning", "persona_accent", "dialect", "role_play", "director_enable", "director_role", "director_scene", "director_instruction", "director_context", "vol", "pitch", "emotion", "bitrate", "channel", "subtitle_enable",
+            "voice_id", "voice", "sing_voice", "overall_tone", "timbre_positioning", "persona_accent", "dialect", "role_play", "director_enable", "director_role", "director_scene", "director_instruction", "director_context", "performance_tags_enable", "performance_tags", "vol", "pitch", "emotion", "bitrate", "channel", "subtitle_enable",
             "output_format", "language_boost", "proxy", "voice_modify", "timber_weights",
             "pronunciation_dict", "aigc_watermark", "max_retries", "timeout",
         )
@@ -721,6 +721,8 @@ class TTSEmotionRouter(Star):
             text or "",
             provider=str(api_cfg.get("provider", "") or ""),
             model=str(api_cfg.get("model", "") or ""),
+            mimo_performance_tags_enable=bool(api_cfg.get("performance_tags_enable", False)),
+            mimo_performance_tags=api_cfg.get("performance_tags", []),
         )
 
     def _prepare_visible_text(self, text: str) -> str:
