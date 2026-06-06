@@ -14,7 +14,8 @@
         "description": "语音服务商",
         "options": [
           "siliconflow",
-          "minimax"
+          "minimax",
+          "mimo"
         ],
         "default": "siliconflow"
       },
@@ -206,6 +207,104 @@
             "type": "bool",
             "description": "是否返回字幕",
             "default": false
+          }
+        }
+      },
+      "mimo": {
+        "type": "object",
+        "description": "MiMo 配置",
+        "condition": {
+          "provider": "mimo"
+        },
+        "items": {
+          "url": {
+            "type": "string",
+            "description": "API 地址",
+            "default": "https://token-plan-cn.xiaomimimo.com/v1"
+          },
+          "key": {
+            "type": "string",
+            "description": "API Key",
+            "default": ""
+          },
+          "model": {
+            "type": "string",
+            "description": "模型名",
+            "default": "mimo-v2.5-tts",
+            "options": [
+              "mimo-v2.5-tts",
+              "mimo-v2.5-tts-voicedesign",
+              "mimo-v2.5-tts-voiceclone"
+            ],
+            "hint": "预置音色模型支持唱歌；voicedesign/voiceclone 不支持唱歌。"
+          },
+          "voice": {
+            "type": "string",
+            "description": "默认音色",
+            "default": "mimo_default",
+            "hint": "建议填写具体 Voice ID，如冰糖/茉莉/Mia/Chloe；不要长期依赖 mimo_default 集群别名。对话里也可临时指定：“用冰糖的音色说……”。"
+          },
+          "format": {
+            "type": "string",
+            "description": "音频格式",
+            "options": [
+              "mp3",
+              "wav"
+            ],
+            "default": "mp3"
+          },
+          "speed": {
+            "type": "float",
+            "description": "默认语速（MiMo 可能忽略）",
+            "default": 1.0
+          },
+          "overall_tone": {
+            "type": "string",
+            "description": "整体语调",
+            "default": "",
+            "hint": "可选：温柔/高冷/活泼/严肃/慵懒/俏皮/深沉/干练/凌厉。也支持对话临时指定，如“用温柔语调说……”。"
+          },
+          "timbre_positioning": {
+            "type": "string",
+            "description": "音色定位",
+            "default": "",
+            "hint": "可选：磁性/醇厚/清亮/空灵/稚嫩/苍老/甜美/沙哑/醇雅。也支持对话临时指定，如“用清亮声音说……”。"
+          },
+          "persona_accent": {
+            "type": "string",
+            "description": "人设腔调",
+            "default": "",
+            "hint": "可选：夹子音/御姐音/正太音/大叔音/台湾腔。也支持对话临时指定，如“用夹子音说……”。"
+          },
+          "dialect": {
+            "type": "string",
+            "description": "方言",
+            "default": "",
+            "hint": "可选：东北话/四川话/河南话/粤语。也支持对话临时指定，如“用东北话说……”。"
+          },
+          "role_play": {
+            "type": "string",
+            "description": "角色扮演",
+            "default": "",
+            "hint": "可选：孙悟空/林黛玉。也支持对话临时指定，如“用孙悟空说……”。"
+          },
+          "style_prompt": {
+            "type": "string",
+            "description": "额外自由风格标签",
+            "default": "",
+            "hint": "自由补充 MiMo 风格标签；可留空。优先使用上方五个结构化配置项，只有无法归类时再填写这里。"
+          },
+          "seed_text": {
+            "type": "string",
+            "description": "可选 user 消息",
+            "default": "",
+            "hint": "自然语言风格指令/对话历史，不会被朗读；可留空。voicedesign 模型可填写音色描述。"
+          },
+          "sing_voice": {
+            "type": "string",
+            "description": "唱歌专用音色",
+            "default": "",
+            "hint": "留空则跟随默认音色 voice。只有想让唱歌使用不同音色时才填写。可选预置音色：冰糖/茉莉/苏打/白桦/Mia/Chloe/Milo/Dean。"
           }
         }
       }
@@ -500,7 +599,7 @@
           "prompt_hint": {
             "type": "text",
             "description": "注入到提示词的说明",
-            "default": "请在回复开头添加 [EMO:happy|sad|angry|neutral]，该标记仅供系统解析，不对用户显示。"
+            "default": "请在回复开头添加一个隐藏情绪标记，格式如 [EMO:happy]。可选情绪：happy/sad/angry/fear/surprise/excited/wronged/neutral/cold/melancholy/gratified/helpless/guilty/relieved/jealous/weary/anxious/affectionate。该标记仅供系统解析，不对用户显示。"
           }
         }
       },
@@ -518,6 +617,9 @@
               "type": "string"
             },
             "default": [
+              "开心",
+              "高兴",
+              "哈哈",
               "happy",
               "great",
               "lol"
@@ -525,26 +627,263 @@
           },
           "sad": {
             "type": "list",
-            "description": "难过关键词",
+            "description": "悲伤关键词",
             "items": {
               "type": "string"
             },
             "default": [
+              "悲伤",
+              "难过",
+              "伤心",
+              "呜呜",
               "sad",
-              "sorry",
               "cry"
             ]
           },
           "angry": {
             "type": "list",
-            "description": "生气关键词",
+            "description": "愤怒关键词",
             "items": {
               "type": "string"
             },
             "default": [
+              "愤怒",
+              "生气",
+              "气死",
+              "可恶",
               "angry",
-              "mad",
-              "annoyed"
+              "mad"
+            ]
+          },
+          "sing": {
+            "type": "list",
+            "description": "唱歌关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "sing",
+              "singing",
+              "唱歌",
+              "唱首歌",
+              "来首歌",
+              "唱一首",
+              "唱一句",
+              "给你唱",
+              "唱",
+              "歌"
+            ]
+          },
+          "fear": {
+            "type": "list",
+            "description": "恐惧关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "恐惧",
+              "害怕",
+              "吓死",
+              "好可怕",
+              "fear",
+              "scared"
+            ]
+          },
+          "surprise": {
+            "type": "list",
+            "description": "惊讶关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "惊讶",
+              "哇",
+              "震惊",
+              "不会吧",
+              "surprise",
+              "wow"
+            ]
+          },
+          "excited": {
+            "type": "list",
+            "description": "兴奋关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "兴奋",
+              "激动",
+              "冲冲冲",
+              "excited",
+              "thrilled"
+            ]
+          },
+          "wronged": {
+            "type": "list",
+            "description": "委屈关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "委屈",
+              "冤枉",
+              "嘤嘤嘤",
+              "wronged"
+            ]
+          },
+          "neutral": {
+            "type": "list",
+            "description": "平静关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "平静",
+              "冷静",
+              "正常",
+              "neutral",
+              "calm"
+            ]
+          },
+          "cold": {
+            "type": "list",
+            "description": "冷漠关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "冷漠",
+              "冷淡",
+              "无所谓",
+              "随便",
+              "cold",
+              "indifferent"
+            ]
+          },
+          "melancholy": {
+            "type": "list",
+            "description": "怅然关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "怅然",
+              "惆怅",
+              "感慨",
+              "melancholy",
+              "wistful"
+            ]
+          },
+          "gratified": {
+            "type": "list",
+            "description": "欣慰关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "欣慰",
+              "安心",
+              "值得了",
+              "gratified",
+              "pleased"
+            ]
+          },
+          "helpless": {
+            "type": "list",
+            "description": "无奈关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "无奈",
+              "没办法",
+              "只能这样",
+              "helpless"
+            ]
+          },
+          "guilty": {
+            "type": "list",
+            "description": "愧疚关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "愧疚",
+              "抱歉",
+              "对不起",
+              "guilty",
+              "sorry"
+            ]
+          },
+          "relieved": {
+            "type": "list",
+            "description": "释然关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "释然",
+              "放心了",
+              "松了口气",
+              "relieved"
+            ]
+          },
+          "jealous": {
+            "type": "list",
+            "description": "嫉妒关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "嫉妒",
+              "羡慕",
+              "酸了",
+              "jealous",
+              "envious"
+            ]
+          },
+          "weary": {
+            "type": "list",
+            "description": "厌倦关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "厌倦",
+              "累了",
+              "够了",
+              "weary",
+              "tired"
+            ]
+          },
+          "anxious": {
+            "type": "list",
+            "description": "忐忑关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "忐忑",
+              "紧张",
+              "不安",
+              "担心",
+              "anxious",
+              "nervous"
+            ]
+          },
+          "affectionate": {
+            "type": "list",
+            "description": "动情关键词",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "动情",
+              "深情",
+              "感动",
+              "爱",
+              "affectionate",
+              "loving"
             ]
           }
         }
@@ -558,25 +897,120 @@
         "items": {
           "neutral": {
             "type": "string",
-            "description": "中性音色",
-            "default": ""
+            "description": "平静音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
           },
           "happy": {
             "type": "string",
-            "description": "开心音色",
-            "default": ""
+            "description": "开心音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
           },
           "sad": {
             "type": "string",
-            "description": "难过音色",
-            "default": ""
+            "description": "悲伤音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
           },
           "angry": {
             "type": "string",
-            "description": "生气音色",
-            "default": ""
+            "description": "愤怒音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "fear": {
+            "type": "string",
+            "description": "恐惧音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "surprise": {
+            "type": "string",
+            "description": "惊讶音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "excited": {
+            "type": "string",
+            "description": "兴奋音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "wronged": {
+            "type": "string",
+            "description": "委屈音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "cold": {
+            "type": "string",
+            "description": "冷漠音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "melancholy": {
+            "type": "string",
+            "description": "怅然音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "gratified": {
+            "type": "string",
+            "description": "欣慰音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "helpless": {
+            "type": "string",
+            "description": "无奈音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "guilty": {
+            "type": "string",
+            "description": "愧疚音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "relieved": {
+            "type": "string",
+            "description": "释然音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "jealous": {
+            "type": "string",
+            "description": "嫉妒音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "weary": {
+            "type": "string",
+            "description": "厌倦音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "anxious": {
+            "type": "string",
+            "description": "忐忑音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "affectionate": {
+            "type": "string",
+            "description": "动情音色/标签",
+            "default": "",
+            "hint": "可填写该供应商有效的 voice id；留空则回退到平静/默认音色。MiMo 即使留空也会根据 emotion 自动添加中文情绪标签。"
+          },
+          "sing": {
+            "type": "string",
+            "description": "唱歌音色/标签",
+            "default": "",
+            "hint": "通用默认留空，避免其他供应商误把“唱歌”当 voice id。MiMo 会在 emotion=sing 时自动添加“唱歌”标签。其他供应商如支持唱歌，可手动填写有效 voice id/标签。"
           }
-        }
+        },
+        "hint": "通用情绪到音色映射。请填写当前供应商有效的 voice id；默认留空以避免把 MiMo 中文标签误传给其他供应商。MiMo 会在 voice_map 留空时根据 emotion 自动添加中文情绪/唱歌标签。"
       },
       "speed_map": {
         "type": "object",
@@ -587,25 +1021,120 @@
         "items": {
           "neutral": {
             "type": "float",
-            "description": "中性语速",
-            "default": 1.0
+            "description": "平静语速",
+            "default": 1.0,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
           },
           "happy": {
             "type": "float",
             "description": "开心语速",
-            "default": 1.2
+            "default": 1.15,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
           },
           "sad": {
             "type": "float",
-            "description": "难过语速",
-            "default": 0.85
+            "description": "悲伤语速",
+            "default": 0.9,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
           },
           "angry": {
             "type": "float",
-            "description": "生气语速",
-            "default": 1.1
+            "description": "愤怒语速",
+            "default": 1.15,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "fear": {
+            "type": "float",
+            "description": "恐惧语速",
+            "default": 1.05,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "surprise": {
+            "type": "float",
+            "description": "惊讶语速",
+            "default": 1.12,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "excited": {
+            "type": "float",
+            "description": "兴奋语速",
+            "default": 1.2,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "wronged": {
+            "type": "float",
+            "description": "委屈语速",
+            "default": 0.92,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "cold": {
+            "type": "float",
+            "description": "冷漠语速",
+            "default": 0.95,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "melancholy": {
+            "type": "float",
+            "description": "怅然语速",
+            "default": 0.9,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "gratified": {
+            "type": "float",
+            "description": "欣慰语速",
+            "default": 1.0,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "helpless": {
+            "type": "float",
+            "description": "无奈语速",
+            "default": 0.95,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "guilty": {
+            "type": "float",
+            "description": "愧疚语速",
+            "default": 0.92,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "relieved": {
+            "type": "float",
+            "description": "释然语速",
+            "default": 1.0,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "jealous": {
+            "type": "float",
+            "description": "嫉妒语速",
+            "default": 1.05,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "weary": {
+            "type": "float",
+            "description": "厌倦语速",
+            "default": 0.9,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "anxious": {
+            "type": "float",
+            "description": "忐忑语速",
+            "default": 1.08,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "affectionate": {
+            "type": "float",
+            "description": "动情语速",
+            "default": 0.95,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
+          },
+          "sing": {
+            "type": "float",
+            "description": "唱歌语速",
+            "default": 1.0,
+            "hint": "1.0 为默认；MiMo 可能忽略语速。"
           }
-        }
+        },
+        "hint": "通用情绪到语速映射。1.0 表示默认；部分供应商（包括 MiMo）可能忽略语速参数。"
       }
     }
   }

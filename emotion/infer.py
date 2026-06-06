@@ -1,16 +1,23 @@
 from typing import List, Optional, Dict, Pattern, Set
 import re
 
-from ..core.constants import DEFAULT_EMOTION_KEYWORDS_LIST
-
-EMOTIONS: List[str] = ["neutral", "happy", "sad", "angry"]
+from ..core.constants import DEFAULT_EMOTION_KEYWORDS_LIST, EMOTION_KEYWORDS, EMOTIONS
 
 # 极简启发式情绪分类器，避免引入大模型依赖；后续可替换为 onnx 推理
 DEFAULT_KEYWORDS: Dict[str, Set[str]] = {
     k: set(v) for k, v in DEFAULT_EMOTION_KEYWORDS_LIST.items()
 }
+# Do not try to derive keyword strings from regex.pattern: escaped Chinese
+# sequences such as "\u59d4\u5c48" would become literal backslash text.
+# The compiled EMOTION_KEYWORDS regexes below provide the full 18-emotion
+# coverage; DEFAULT_KEYWORDS remains the user-editable simple keyword layer.
 
 URL_RE: Pattern = re.compile(r"https?://|www\.")
+SING_INTENT_RE: Pattern = re.compile(
+    r"(唱(?:首|一首|一句|歌)?|来(?:首|一首)|献唱|哼(?:首|一段)?|"
+    r"歌曲|歌词|开嗓|清唱|唱给|大海啊大海)",
+    re.I,
+)
 # 代码块检测
 CODE_BLOCK_RE: Pattern = re.compile(r'```[a-zA-Z0-9_+-]*\n.*?\n```', re.DOTALL)
 INLINE_CODE_RE: Pattern = re.compile(r'`([^`\n]+)`')
@@ -32,7 +39,7 @@ def is_informational(text: str) -> bool:
             len(code_content) > 20):
             has_inline_code = True
             break
-    
+
     return has_url or has_code_block or has_inline_code
 
 
@@ -42,17 +49,39 @@ def classify(text: str, context: Optional[List[str]] = None, keywords: Optional[
         return "neutral"
 
     t = (text or "").lower()
-    score: Dict[str, float] = {"happy": 0.0, "sad": 0.0, "angry": 0.0}
-    
-    # 使用传入的关键词或默认关键词
+
+    # 唱歌是用户的明确功能意图，必须高于普通情绪识别。
+    if SING_INTENT_RE.search(text or ""):
+        return "sing"
+
+    # 使用传入的关键词或默认关键词。支持配置里的扩展情绪（尤其 sing）。
     kw_map = keywords if keywords else DEFAULT_KEYWORDS
+
+    # 唱歌是明确意图，不应该被感叹号或其他情绪抢走。
+    for w in kw_map.get("sing", set()):
+        if w and w.lower() in t:
+            return "sing"
+
+    score: Dict[str, float] = {emo: 0.0 for emo in EMOTIONS if emo not in ("neutral", "sing")}
+    for emo in kw_map.keys():
+        if emo not in ("neutral", "sing"):
+            score.setdefault(emo, 0.0)
 
     # 简单计数词典命中
     for emo, words in kw_map.items():
+        if emo == "sing":
+            continue
         if emo in score:
             for w in words:
-                if w.lower() in t:
+                if w and w.lower() in t:
                     score[emo] += 1.0
+
+    # 内置正则覆盖 18 种情绪。
+    for emo, pattern in EMOTION_KEYWORDS.items():
+        if emo in ("sing", "neutral"):
+            continue
+        if emo in score and pattern.search(text or ""):
+            score[emo] += 1.0
 
     # 感叹号、全大写等作为情绪增强
     if text and "!" in text:
@@ -61,7 +90,7 @@ def classify(text: str, context: Optional[List[str]] = None, keywords: Optional[
         text
         and text.strip()
         and text == text.upper()
-        and any(c.isalpha() for c in text)
+        and any(("a" <= c.lower() <= "z") for c in text)
     ):
         score["angry"] += 1.0
 
@@ -73,9 +102,11 @@ def classify(text: str, context: Optional[List[str]] = None, keywords: Optional[
             ctx = "\n".join(valid_context[-3:]).lower()
             # 使用相同的关键词映射进行上下文加权
             for emo, words in kw_map.items():
+                if emo == "sing":
+                    continue
                 if emo in score:
                     for w in words:
-                        if w.lower() in ctx:
+                        if w and w.lower() in ctx:
                             score[emo] += 0.2
 
     # 选最大，否则中性
