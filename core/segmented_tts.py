@@ -179,6 +179,7 @@ class SegmentedTTSProcessor:
             emotion = self.tts_processor.determine_emotion(session_state, text)
             style_overrides = session_state.consume_pending_style_overrides()
             director_prompt = session_state.consume_pending_director_prompt()
+            performance_tags = session_state.consume_pending_performance_tags()
             pending_voice = session_state.consume_pending_voice()
             if pending_voice:
                 voice_key, voice_uri = pending_voice, pending_voice
@@ -213,6 +214,7 @@ class SegmentedTTSProcessor:
                         emotion=emotion,
                         style_overrides=style_overrides,
                         director_prompt=director_prompt,
+                        performance_tags=performance_tags,
                     )
 
                     if not audio_path:
@@ -294,6 +296,7 @@ class SegmentedTTSProcessor:
             emotion = self.tts_processor.determine_emotion(session_state, text)
             style_overrides = session_state.consume_pending_style_overrides()
             director_prompt = session_state.consume_pending_director_prompt()
+            performance_tags = session_state.consume_pending_performance_tags()
             pending_voice = session_state.consume_pending_voice()
             if pending_voice:
                 voice_key, voice_uri = pending_voice, pending_voice
@@ -325,6 +328,7 @@ class SegmentedTTSProcessor:
                         emotion=emotion,
                         style_overrides=style_overrides,
                         director_prompt=director_prompt,
+                        performance_tags=performance_tags,
                     )
 
                     if audio_path:

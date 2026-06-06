@@ -41,6 +41,7 @@ class SessionState:
     pending_style_overrides: Optional[Dict[str, str]] = None
     pending_voice: Optional[str] = None
     pending_director_prompt: Optional[str] = None
+    pending_performance_tags: Optional[List[str]] = None
     last_emotion: Optional[str] = None
     last_voice: Optional[str] = None
     last_tts_content: Optional[str] = None
@@ -231,6 +232,22 @@ class SessionState:
         prompt = self.pending_director_prompt
         self.pending_director_prompt = None
         return prompt
+
+    def set_pending_performance_tags(self, tags: Sequence[str]) -> None:
+        cleaned: List[str] = []
+        seen = set()
+        for tag in tags or []:
+            value = str(tag or "").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            cleaned.append(value)
+        self.pending_performance_tags = cleaned or None
+
+    def consume_pending_performance_tags(self) -> List[str]:
+        tags = self.pending_performance_tags or []
+        self.pending_performance_tags = None
+        return list(tags)
 
     def is_cooldown_expired(self, cooldown: int) -> bool:
         """

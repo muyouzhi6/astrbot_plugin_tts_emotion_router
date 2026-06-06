@@ -7,7 +7,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 import aiohttp
 import asyncio
@@ -178,7 +178,12 @@ class MiMoTTS:
             await self._session.close()
             self._session = None
 
-    def _build_style_prefix(self, emotion_tag: Optional[str] = None, style_overrides: Optional[Dict[str, str]] = None) -> str:
+    def _build_style_prefix(
+        self,
+        emotion_tag: Optional[str] = None,
+        style_overrides: Optional[Dict[str, str]] = None,
+        performance_tags: Optional[Sequence[str]] = None,
+    ) -> str:
         """构建情绪标签前缀
 
         根据小米官方文档，情绪标签使用括号格式：
@@ -208,6 +213,13 @@ class MiMoTTS:
         # 兼容旧配置：额外自由风格标签仍可叠加在最后。
         if self.style_prompt.strip():
             style_parts.append(self.style_prompt.strip())
+
+        # Explicit MiMo performance tags from the current user/LLM turn.
+        # They are already whitelist-filtered by the caller and are never inferred here.
+        for tag in performance_tags or []:
+            value = str(tag or "").strip()
+            if value and value not in style_parts:
+                style_parts.append(value)
 
         style_content = "、".join(style_parts).strip()
         if not style_content:
@@ -315,6 +327,7 @@ class MiMoTTS:
         strict_sing: bool = False,
         style_overrides: Optional[Dict[str, str]] = None,
         temporary_director_prompt: Optional[str] = None,
+        performance_tags: Optional[Sequence[str]] = None,
     ) -> dict:
         """构建 MiMo TTS API 请求 payload
 
@@ -339,7 +352,11 @@ class MiMoTTS:
 
         # 构建 assistant content（带 style 标签）
         synth_text = self._prepare_strict_sing_text(text) if strict_sing else text
-        style_prefix = self._build_style_prefix(emotion_tag, style_overrides=style_overrides)
+        style_prefix = self._build_style_prefix(
+            emotion_tag,
+            style_overrides=style_overrides,
+            performance_tags=performance_tags,
+        )
         assistant_content = f"{style_prefix}{synth_text}" if style_prefix else synth_text
         if strict_sing:
             logger.info("MiMoTTS: strict singing content=%r", assistant_content[:200])
@@ -373,6 +390,7 @@ class MiMoTTS:
         emotion: Optional[str] = None,
         style_overrides: Optional[Dict[str, str]] = None,
         director_prompt: Optional[str] = None,
+        performance_tags: Optional[Sequence[str]] = None,
     ) -> Optional[Path]:
         """合成语音
 
@@ -440,6 +458,7 @@ class MiMoTTS:
                     "strict_sing": STRICT_SING_CACHE_VERSION if strict_sing else "",
                     "style_overrides": style_overrides or {},
                     "director_prompt": director_prompt or "",
+                    "performance_tags": list(performance_tags or []),
                 },
                 ensure_ascii=False,
             ).encode("utf-8")
@@ -465,6 +484,7 @@ class MiMoTTS:
             strict_sing=strict_sing,
             style_overrides=style_overrides,
             temporary_director_prompt=director_prompt,
+            performance_tags=performance_tags,
         )
         if strict_sing:
             logger.info("MiMoTTS: strict singing mode enabled")

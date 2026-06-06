@@ -52,6 +52,7 @@ from .core.constants import (
     DEFAULT_TEST_TEXT,
     MINIMAX_EXPRESSIVE_MODELS,
     MINIMAX_EXPRESSIVE_TAGS,
+    MIMO_PERFORMANCE_TAGS,
 )
 from .core.session import SessionState
 from .core.config import ConfigManager
@@ -780,6 +781,28 @@ class TTSEmotionRouter(Star):
             logging.error("manual tts send failed: %s", e)
             return f"发送失败：{e}"
 
+    def _extract_temporary_performance_tags(self, text: str) -> List[str]:
+        api_cfg = self.config.get_api_config()
+        if self.config.get_tts_provider() != "mimo" or not bool(api_cfg.get("performance_tags_enable", False)):
+            return []
+        whitelist = {
+            str(tag or "").strip()
+            for tag in (api_cfg.get("performance_tags") or MIMO_PERFORMANCE_TAGS)
+            if str(tag or "").strip()
+        }
+        if not whitelist:
+            return []
+
+        matched: List[str] = []
+        seen = set()
+        for match in re.finditer(r"[（(]\s*([^（）()\n]{1,24})\s*[）)]", text or ""):
+            tag = (match.group(1) or "").strip()
+            if tag not in whitelist or tag in seen:
+                continue
+            seen.add(tag)
+            matched.append(tag)
+        return matched
+
     def _extract_temporary_voice_directives(self, text: str) -> Tuple[Optional[str], Dict[str, str], Optional[str], Optional[str]]:
         """Extract one-turn MiMo style/emotion/voice directives from user text.
 
@@ -834,7 +857,8 @@ class TTSEmotionRouter(Star):
             return
 
         emotion, style_overrides, pending_voice, pending_director = self._extract_temporary_voice_directives(text)
-        if not emotion and not style_overrides and not pending_voice and not pending_director:
+        performance_tags = self._extract_temporary_performance_tags(text)
+        if not emotion and not style_overrides and not pending_voice and not pending_director and not performance_tags:
             return
         st = self._get_session_state(self._get_umo(event))
         if emotion:
@@ -845,13 +869,16 @@ class TTSEmotionRouter(Star):
             st.set_pending_voice(pending_voice)
         if pending_director:
             st.set_pending_director_prompt(pending_director)
+        if performance_tags:
+            st.set_pending_performance_tags(performance_tags)
         logger.info(
-            "temporary MiMo voice directives sid=%s emotion=%s styles=%s voice=%s director=%s",
+            "temporary MiMo voice directives sid=%s emotion=%s styles=%s voice=%s director=%s performance_tags=%s",
             self._get_umo(event),
             emotion,
             style_overrides,
             pending_voice,
             bool(pending_director),
+            performance_tags,
         )
 
     # ---------------- llm hooks ----------------
