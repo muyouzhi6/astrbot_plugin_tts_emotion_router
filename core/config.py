@@ -244,6 +244,11 @@ class ConfigManager:
             "dialect": "",
             "role_play": "",
             "seed_text": "",
+            "director_enable": False,
+            "director_role": "",
+            "director_scene": "",
+            "director_instruction": "",
+            "director_context": "",
         }
         for k, v in mi_defaults.items():
             if k not in mi:
@@ -502,6 +507,11 @@ class ConfigManager:
                 "dialect": str(mi.get("dialect", "")),
                 "role_play": str(mi.get("role_play", "")),
                 "seed_text": str(mi.get("seed_text", "")),
+                "director_enable": bool(mi.get("director_enable", False)),
+                "director_role": str(mi.get("director_role", "")),
+                "director_scene": str(mi.get("director_scene", "")),
+                "director_instruction": str(mi.get("director_instruction", "")),
+                "director_context": str(mi.get("director_context", "")),
                 "gain": 0.0,
                 "vol": DEFAULT_MINIMAX_VOL,
                 "pitch": DEFAULT_MINIMAX_PITCH,

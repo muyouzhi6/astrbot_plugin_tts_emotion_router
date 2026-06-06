@@ -178,6 +178,7 @@ class SegmentedTTSProcessor:
             # 2. 确定统一的情绪/音色/语速（基于整段文本）
             emotion = self.tts_processor.determine_emotion(session_state, text)
             style_overrides = session_state.consume_pending_style_overrides()
+            director_prompt = session_state.consume_pending_director_prompt()
             pending_voice = session_state.consume_pending_voice()
             if pending_voice:
                 voice_key, voice_uri = pending_voice, pending_voice
@@ -211,6 +212,7 @@ class SegmentedTTSProcessor:
                         speed,
                         emotion=emotion,
                         style_overrides=style_overrides,
+                        director_prompt=director_prompt,
                     )
 
                     if not audio_path:
@@ -291,6 +293,7 @@ class SegmentedTTSProcessor:
             # 2. 确定统一的情绪/音色/语速
             emotion = self.tts_processor.determine_emotion(session_state, text)
             style_overrides = session_state.consume_pending_style_overrides()
+            director_prompt = session_state.consume_pending_director_prompt()
             pending_voice = session_state.consume_pending_voice()
             if pending_voice:
                 voice_key, voice_uri = pending_voice, pending_voice
@@ -321,6 +324,7 @@ class SegmentedTTSProcessor:
                         speed,
                         emotion=emotion,
                         style_overrides=style_overrides,
+                        director_prompt=director_prompt,
                     )
 
                     if audio_path:

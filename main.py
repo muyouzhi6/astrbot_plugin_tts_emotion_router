@@ -192,6 +192,11 @@ class TTSEmotionRouter(Star):
                 role_play=api_cfg.get("role_play", ""),
                 seed_text=api_cfg.get("seed_text", ""),
                 sing_voice=api_cfg.get("sing_voice", ""),
+                director_enable=api_cfg.get("director_enable", False),
+                director_role=api_cfg.get("director_role", ""),
+                director_scene=api_cfg.get("director_scene", ""),
+                director_instruction=api_cfg.get("director_instruction", ""),
+                director_context=api_cfg.get("director_context", ""),
             )
 
         return SiliconFlowTTS(
@@ -210,7 +215,7 @@ class TTSEmotionRouter(Star):
         api_cfg = self.config.get_api_config()
         keys = (
             "provider", "url", "key", "model", "format", "speed", "gain", "sample_rate",
-            "voice_id", "voice", "sing_voice", "overall_tone", "timbre_positioning", "persona_accent", "dialect", "role_play", "vol", "pitch", "emotion", "bitrate", "channel", "subtitle_enable",
+            "voice_id", "voice", "sing_voice", "overall_tone", "timbre_positioning", "persona_accent", "dialect", "role_play", "director_enable", "director_role", "director_scene", "director_instruction", "director_context", "vol", "pitch", "emotion", "bitrate", "channel", "subtitle_enable",
             "output_format", "language_boost", "proxy", "voice_modify", "timber_weights",
             "pronunciation_dict", "aigc_watermark", "max_retries", "timeout",
         )
@@ -773,7 +778,7 @@ class TTSEmotionRouter(Star):
             logging.error("manual tts send failed: %s", e)
             return f"发送失败：{e}"
 
-    def _extract_temporary_voice_directives(self, text: str) -> Tuple[Optional[str], Dict[str, str], Optional[str]]:
+    def _extract_temporary_voice_directives(self, text: str) -> Tuple[Optional[str], Dict[str, str], Optional[str], Optional[str]]:
         """Extract one-turn MiMo style/emotion/voice directives from user text.
 
         Voice names are only accepted with an explicit speech context such as
@@ -782,7 +787,7 @@ class TTSEmotionRouter(Star):
         """
         raw = str(text or "")
         if not raw.strip():
-            return None, {}, None
+            return None, {}, None, None
 
         pending_emotion: Optional[str] = None
         for zh_label, emotion_key in MIMO_EMOTION_TAGS_REVERSE.items():
@@ -804,7 +809,21 @@ class TTSEmotionRouter(Star):
                 pending_voice = voice_name
                 break
 
-        return pending_emotion, style_overrides, pending_voice
+        pending_director: Optional[str] = None
+        director_patterns = (
+            r"(?:用这种语音风格|语音导演|本次语音指导|临时语音指导|按这个风格说|按这种风格说)\s*[:：]\s*(?P<prompt>.+)",
+            r'(?:用|按)\s*(?P<prompt>[^。！？!?"“”]{4,80}?)\s*(?:的)?\s*(?:语音风格|说话风格|表演方式)\s*(?:说|讲|朗读)',
+        )
+        for pattern in director_patterns:
+            m = re.search(pattern, raw, re.I | re.S)
+            if m:
+                candidate = (m.group("prompt") or "").strip()
+                candidate = re.split(r"(?:\n|。|！|？|!|\?)", candidate, maxsplit=1)[0].strip()
+                if candidate:
+                    pending_director = candidate[:300]
+                    break
+
+        return pending_emotion, style_overrides, pending_voice, pending_director
 
     def _publish_temporary_voice_directives(self, event: AstrMessageEvent, text: str) -> None:
         # MiMo-only: these directives use MiMo preset voices and Chinese style tags.
@@ -812,8 +831,8 @@ class TTSEmotionRouter(Star):
         if self.config.get_tts_provider() != "mimo":
             return
 
-        emotion, style_overrides, pending_voice = self._extract_temporary_voice_directives(text)
-        if not emotion and not style_overrides and not pending_voice:
+        emotion, style_overrides, pending_voice, pending_director = self._extract_temporary_voice_directives(text)
+        if not emotion and not style_overrides and not pending_voice and not pending_director:
             return
         st = self._get_session_state(self._get_umo(event))
         if emotion:
@@ -822,12 +841,15 @@ class TTSEmotionRouter(Star):
             st.set_pending_style_overrides(style_overrides)
         if pending_voice:
             st.set_pending_voice(pending_voice)
+        if pending_director:
+            st.set_pending_director_prompt(pending_director)
         logger.info(
-            "temporary MiMo voice directives sid=%s emotion=%s styles=%s voice=%s",
+            "temporary MiMo voice directives sid=%s emotion=%s styles=%s voice=%s director=%s",
             self._get_umo(event),
             emotion,
             style_overrides,
             pending_voice,
+            bool(pending_director),
         )
 
     # ---------------- llm hooks ----------------

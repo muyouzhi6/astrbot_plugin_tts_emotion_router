@@ -40,6 +40,7 @@ class SessionState:
     pending_emotion: Optional[str] = None
     pending_style_overrides: Optional[Dict[str, str]] = None
     pending_voice: Optional[str] = None
+    pending_director_prompt: Optional[str] = None
     last_emotion: Optional[str] = None
     last_voice: Optional[str] = None
     last_tts_content: Optional[str] = None
@@ -221,6 +222,15 @@ class SessionState:
         voice = self.pending_voice
         self.pending_voice = None
         return voice
+
+    def set_pending_director_prompt(self, prompt: str) -> None:
+        cleaned = str(prompt or "").strip()
+        self.pending_director_prompt = cleaned or None
+
+    def consume_pending_director_prompt(self) -> Optional[str]:
+        prompt = self.pending_director_prompt
+        self.pending_director_prompt = None
+        return prompt
 
     def is_cooldown_expired(self, cooldown: int) -> bool:
         """

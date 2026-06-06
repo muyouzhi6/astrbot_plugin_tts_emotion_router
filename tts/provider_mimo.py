@@ -140,6 +140,11 @@ class MiMoTTS:
         timbre_positioning: str = "",
         persona_accent: str = "",
         role_play: str = "",
+        director_enable: bool = False,
+        director_role: str = "",
+        director_scene: str = "",
+        director_instruction: str = "",
+        director_context: str = "",
     ):
         self.api_url = (api_url or "https://api.xiaomimimo.com/v1").rstrip("/")
         self.api_key = api_key or ""
@@ -156,6 +161,11 @@ class MiMoTTS:
         self.dialect = dialect
         self.role_play = role_play
         self.seed_text = seed_text
+        self.director_enable = bool(director_enable)
+        self.director_role = director_role
+        self.director_scene = director_scene
+        self.director_instruction = director_instruction
+        self.director_context = director_context
         # Empty sing_voice means "follow the main/default voice".  Use a
         # concrete main voice such as 冰糖/茉莉 if you need stable timbre; the
         # MiMo backend alias "mimo_default" may vary by deployment cluster.
@@ -206,15 +216,43 @@ class MiMoTTS:
         # 使用括号格式（小米官方文档推荐）
         return f"（{style_content}）"
 
-    def _build_user_prompt(self) -> Optional[str]:
-        """构建 user prompt.
+    def _build_user_prompt(self, temporary_director_prompt: Optional[str] = None) -> Optional[str]:
+        """构建不会被朗读的 user prompt。
 
-        Per MiMo docs, user messages are optional natural-language style
-        instructions or conversation history and are not spoken.  Leave empty
-        by default; do not inject arbitrary seed text.
+        MiMo 支持在 user message 中放自然语言风格指令/对话历史。
+        这里将旧的 seed_text 与新的导演模式字段合并，最终只生成一条
+        user message，避免把控制指令混入 assistant 待朗读文本。
         """
+        parts: list[str] = []
         seed_text = self.seed_text.strip()
-        return seed_text if seed_text else None
+        if seed_text:
+            parts.append(seed_text)
+
+        if self.director_enable:
+            director_parts: list[str] = []
+            role = self.director_role.strip()
+            scene = self.director_scene.strip()
+            instruction = self.director_instruction.strip()
+            context = self.director_context.strip()
+            if role:
+                director_parts.append(f"角色：{role}")
+            if scene:
+                director_parts.append(f"场景：{scene}")
+            if instruction:
+                director_parts.append(f"指导：{instruction}")
+            if context:
+                director_parts.append(f"上下文：{context}")
+            if director_parts:
+                parts.append(
+                    "请按以下导演模式进行语音表演，这些要求不要朗读出来：\n"
+                    + "\n".join(director_parts)
+                )
+
+        temp_prompt = str(temporary_director_prompt or "").strip()
+        if temp_prompt:
+            parts.append("本次临时语音指导：" + temp_prompt)
+
+        return "\n\n".join(parts).strip() or None
 
     def _prepare_strict_sing_text(self, text: str) -> str:
         """把用户/LLM 的唱歌式回复压成更像歌词的文本。
@@ -276,6 +314,7 @@ class MiMoTTS:
         *,
         strict_sing: bool = False,
         style_overrides: Optional[Dict[str, str]] = None,
+        temporary_director_prompt: Optional[str] = None,
     ) -> dict:
         """构建 MiMo TTS API 请求 payload
 
@@ -289,7 +328,7 @@ class MiMoTTS:
         messages: list[dict[str, str]] = []
 
         # 添加 user prompt（seed text）
-        user_prompt = self._build_strict_sing_user_prompt() if strict_sing else self._build_user_prompt()
+        user_prompt = self._build_strict_sing_user_prompt() if strict_sing else self._build_user_prompt(temporary_director_prompt)
         if user_prompt:
             messages.append(
                 {
@@ -333,6 +372,7 @@ class MiMoTTS:
         *,
         emotion: Optional[str] = None,
         style_overrides: Optional[Dict[str, str]] = None,
+        director_prompt: Optional[str] = None,
     ) -> Optional[Path]:
         """合成语音
 
@@ -399,6 +439,7 @@ class MiMoTTS:
                     "f": self.format,
                     "strict_sing": STRICT_SING_CACHE_VERSION if strict_sing else "",
                     "style_overrides": style_overrides or {},
+                    "director_prompt": director_prompt or "",
                 },
                 ensure_ascii=False,
             ).encode("utf-8")
@@ -423,6 +464,7 @@ class MiMoTTS:
             actual_voice=actual_voice,
             strict_sing=strict_sing,
             style_overrides=style_overrides,
+            temporary_director_prompt=director_prompt,
         )
         if strict_sing:
             logger.info("MiMoTTS: strict singing mode enabled")
