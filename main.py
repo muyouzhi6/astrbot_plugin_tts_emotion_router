@@ -793,14 +793,27 @@ class TTSEmotionRouter(Star):
         if not whitelist:
             return []
 
+        raw = str(text or "")
         matched: List[str] = []
         seen = set()
-        for match in re.finditer(r"[（(]\s*([^（）()\n]{1,24})\s*[）)]", text or ""):
+
+        # Explicit bracket tags in a director prompt: “开头带（叹气）”.
+        for match in re.finditer(r"[（(]\s*([^（）()\n]{1,24})\s*[）)]", raw):
             tag = (match.group(1) or "").strip()
             if tag not in whitelist or tag in seen:
                 continue
             seen.add(tag)
             matched.append(tag)
+
+        # Natural-language director prompt: “叹气地说 / 带一点哽咽 / 轻笑一下”.
+        # Prefer longer tags first so “声音颤抖” wins over “颤抖”.
+        for tag in sorted(whitelist, key=len, reverse=True):
+            if tag in seen:
+                continue
+            if re.search(re.escape(tag), raw):
+                seen.add(tag)
+                matched.append(tag)
+
         return matched
 
     def _extract_temporary_voice_directives(self, text: str) -> Tuple[Optional[str], Dict[str, str], Optional[str], Optional[str]]:
@@ -836,8 +849,8 @@ class TTSEmotionRouter(Star):
 
         pending_director: Optional[str] = None
         director_patterns = (
-            r"(?:用这种语音风格|语音导演|本次语音指导|临时语音指导|按这个风格说|按这种风格说)\s*[:：]\s*(?P<prompt>.+)",
-            r'(?:用|按)\s*(?P<prompt>[^。！？!?"“”]{4,80}?)\s*(?:的)?\s*(?:语音风格|说话风格|表演方式)\s*(?:说|讲|朗读)',
+            r"(?:用这种语音风格|语音导演|语音指导|本次语音指导|临时语音指导|按这个风格说|按这种风格说)\s*[:：]\s*(?P<prompt>.+)",
+            r'(?:用|按)\s*(?P<prompt>[^。！？!?"“”]{2,80}?)\s*(?:的)?\s*(?:语音风格|说话风格|表演方式)\s*(?:说|讲|朗读)',
         )
         for pattern in director_patterns:
             m = re.search(pattern, raw, re.I | re.S)
@@ -857,7 +870,7 @@ class TTSEmotionRouter(Star):
             return
 
         emotion, style_overrides, pending_voice, pending_director = self._extract_temporary_voice_directives(text)
-        performance_tags = self._extract_temporary_performance_tags(text)
+        performance_tags = self._extract_temporary_performance_tags(pending_director or "")
         if not emotion and not style_overrides and not pending_voice and not pending_director and not performance_tags:
             return
         st = self._get_session_state(self._get_umo(event))

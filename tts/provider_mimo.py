@@ -204,10 +204,6 @@ class MiMoTTS:
             style_parts.append(self.style_prompt.strip())
 
         prefixes: list[str] = []
-        style_content = "、".join(style_parts).strip()
-        if style_content:
-            prefixes.append(f"（{style_content}）")
-
         seen_performance = set()
         for tag in performance_tags or []:
             value = str(tag or "").strip()
@@ -215,6 +211,10 @@ class MiMoTTS:
                 continue
             seen_performance.add(value)
             prefixes.append(f"（{value}）")
+
+        style_content = "、".join(style_parts).strip()
+        if style_content:
+            prefixes.append(f"（{style_content}）")
 
         return "".join(prefixes)
 
