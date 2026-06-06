@@ -184,49 +184,39 @@ class MiMoTTS:
         style_overrides: Optional[Dict[str, str]] = None,
         performance_tags: Optional[Sequence[str]] = None,
     ) -> str:
-        """构建情绪标签前缀
+        """构建 MiMo 控制标签前缀。
 
-        根据小米官方文档，情绪标签使用括号格式：
-        - (唱歌)文本
-        - (开心)文本
-        - （唱歌）文本（全角括号也可以）
-
-        Args:
-            emotion_tag: 情绪标签（如"唱歌"、"开心"等）
-
-        Returns:
-            括号格式的情绪标签字符串，如果没有情绪标签则返回空字符串
+        情绪/风格标签保持原有聚合形式；表演标签是显式舞台动作，
+        需要独立括号透传，避免被拼成“平静、叹气”后无法识别。
         """
         style_parts: list[str] = []
 
-        # 优先使用传入的情绪标签
         if emotion_tag:
             style_parts.append(emotion_tag)
 
         overrides = style_overrides or {}
-
         for field in MIMO_STYLE_FIELD_NAMES:
             value = str(overrides.get(field) or getattr(self, field, "") or "").strip()
             if value:
                 style_parts.append(value)
 
-        # 兼容旧配置：额外自由风格标签仍可叠加在最后。
         if self.style_prompt.strip():
             style_parts.append(self.style_prompt.strip())
 
-        # Explicit MiMo performance tags from the current user/LLM turn.
-        # They are already whitelist-filtered by the caller and are never inferred here.
+        prefixes: list[str] = []
+        style_content = "、".join(style_parts).strip()
+        if style_content:
+            prefixes.append(f"（{style_content}）")
+
+        seen_performance = set()
         for tag in performance_tags or []:
             value = str(tag or "").strip()
-            if value and value not in style_parts:
-                style_parts.append(value)
+            if not value or value in seen_performance:
+                continue
+            seen_performance.add(value)
+            prefixes.append(f"（{value}）")
 
-        style_content = "、".join(style_parts).strip()
-        if not style_content:
-            return ""
-
-        # 使用括号格式（小米官方文档推荐）
-        return f"（{style_content}）"
+        return "".join(prefixes)
 
     def _build_user_prompt(self, temporary_director_prompt: Optional[str] = None) -> Optional[str]:
         """构建不会被朗读的 user prompt。
