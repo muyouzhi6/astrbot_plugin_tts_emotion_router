@@ -816,6 +816,25 @@ class TTSEmotionRouter(Star):
 
         return matched
 
+    def _extract_direct_speak_text(self, director_prompt: str) -> Optional[str]:
+        prompt = str(director_prompt or "").strip()
+        if not prompt:
+            return None
+        if not re.search(r"(?:念出|朗读|读出|直接读|原文|这段话|以下内容|下面这段)", prompt):
+            return None
+        quote_patterns = (
+            r'[“"](?P<text>.+?)[”"]',
+            r"[‘\'](?P<text>.+?)[’\']",
+            r"「(?P<text>.+?)」",
+            r"『(?P<text>.+?)』",
+        )
+        for pattern in quote_patterns:
+            matches = list(re.finditer(pattern, prompt, re.S))
+            if matches:
+                value = (matches[-1].group("text") or "").strip()
+                return value[:2000] if value else None
+        return None
+
     def _extract_temporary_voice_directives(self, text: str) -> Tuple[Optional[str], Dict[str, str], Optional[str], Optional[str]]:
         """Extract one-turn MiMo style/emotion/voice directives from user text.
 
@@ -849,7 +868,7 @@ class TTSEmotionRouter(Star):
 
         pending_director: Optional[str] = None
         director_patterns = (
-            r"(?:用这种语音风格|语音导演|语音指导|本次语音指导|临时语音指导|按这个风格说|按这种风格说)\s*[:：]\s*(?P<prompt>.+)",
+            r"(?:用这种语音风格|语音导演|导演指导|语音指导|本次语音指导|临时语音指导|按这个风格说|按这种风格说)\s*[:：]\s*(?P<prompt>.+)",
             r'(?:用|按)\s*(?P<prompt>[^。！？!?"“”]{2,80}?)\s*(?:的)?\s*(?:语音风格|说话风格|表演方式)\s*(?:说|讲|朗读)',
         )
         for pattern in director_patterns:
@@ -882,6 +901,9 @@ class TTSEmotionRouter(Star):
             st.set_pending_voice(pending_voice)
         if pending_director:
             st.set_pending_director_prompt(pending_director)
+            direct_speak_text = self._extract_direct_speak_text(pending_director)
+            if direct_speak_text:
+                st.set_pending_direct_speak_text(direct_speak_text)
         if performance_tags:
             st.set_pending_performance_tags(performance_tags)
         logger.info(
@@ -1074,6 +1096,12 @@ class TTSEmotionRouter(Star):
             return
 
         text = self._normalize_text(" ".join(text_parts))
+        st = self._get_session_state(umo)
+        direct_speak_text = st.consume_pending_direct_speak_text()
+        if direct_speak_text:
+            text = self._normalize_text(direct_speak_text)
+            result.chain = [Plain(text=text)]
+
         prepared = self._prepare_text_for_tts(text)
         tts_text = (prepared.tts_text or "").strip()
         display_text = (prepared.display_text or "").strip()
@@ -1097,7 +1125,6 @@ class TTSEmotionRouter(Star):
             result.chain = display_chain
             return
 
-        st = self._get_session_state(umo)
         allowed_components = {"Plain", "At", "Reply", "Image", "Face"}
         has_non_plain = any(type(c).__name__ not in allowed_components for c in result.chain)
 

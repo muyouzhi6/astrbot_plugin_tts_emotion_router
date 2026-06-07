@@ -42,6 +42,7 @@ class SessionState:
     pending_voice: Optional[str] = None
     pending_director_prompt: Optional[str] = None
     pending_performance_tags: Optional[List[str]] = None
+    pending_direct_speak_text: Optional[str] = None
     last_emotion: Optional[str] = None
     last_voice: Optional[str] = None
     last_tts_content: Optional[str] = None
@@ -248,6 +249,15 @@ class SessionState:
         tags = self.pending_performance_tags or []
         self.pending_performance_tags = None
         return list(tags)
+
+    def set_pending_direct_speak_text(self, text: str) -> None:
+        cleaned = str(text or "").strip()
+        self.pending_direct_speak_text = cleaned or None
+
+    def consume_pending_direct_speak_text(self) -> Optional[str]:
+        text = self.pending_direct_speak_text
+        self.pending_direct_speak_text = None
+        return text
 
     def is_cooldown_expired(self, cooldown: int) -> bool:
         """
