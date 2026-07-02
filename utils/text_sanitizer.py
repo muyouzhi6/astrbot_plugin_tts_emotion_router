@@ -15,7 +15,7 @@ from ..core.constants import (
     MINIMAX_EXPRESSIVE_TAGS,
     PLUGIN_DIR,
 )
-from ..utils.extract import CodeAndLinkExtractor
+from ..utils.extract import CodeAndLinkExtractor, INLINE_CODE_EXCLUSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,9 @@ _STRICT_MEME_TAG_RE = re.compile(r"&&([^&\n]+)&&")
 _BRACKET_MEME_TAG_RE = re.compile(r"\[([^\[\]\n]+)\](?!\()")
 _PAREN_MEME_TAG_RE = re.compile(r"\(([^()\n]+)\)")
 _ASCII_CONTROL_TAG_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,23}$")
+_REFERENCE_CODE_EXCLUSION_RES = [
+    re.compile(pattern, re.IGNORECASE) for pattern in INLINE_CODE_EXCLUSIONS
+]
 
 
 @dataclass
@@ -101,7 +104,7 @@ class SpeechTextSanitizer:
             display_text=display_text,
             detected_emotion=detected_emotion,
             links=list(display_processed.links),
-            codes=list(display_processed.codes),
+            codes=self._filter_reference_codes(display_processed.codes),
             matched_tags=matched_tags,
         )
 
@@ -110,6 +113,24 @@ class SpeechTextSanitizer:
 
     def _supports_expressive_tags(self, model: str) -> bool:
         return str(model or "").strip().lower() in MINIMAX_EXPRESSIVE_MODELS
+
+    @staticmethod
+    def _inline_code_inner(code: str) -> str:
+        text = str(code or "").strip()
+        if text.startswith("```"):
+            return ""
+        if text.startswith("`") and text.endswith("`") and len(text) >= 2:
+            return text[1:-1].strip()
+        return ""
+
+    def _filter_reference_codes(self, codes: Sequence[str]) -> List[str]:
+        filtered: List[str] = []
+        for code in codes:
+            inner = self._inline_code_inner(code)
+            if inner and any(pattern.match(inner) for pattern in _REFERENCE_CODE_EXCLUSION_RES):
+                continue
+            filtered.append(code)
+        return filtered
 
     def _load_meme_tags(self) -> set[str]:
         json_path = self.meme_json_path
