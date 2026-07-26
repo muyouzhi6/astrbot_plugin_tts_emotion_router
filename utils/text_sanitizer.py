@@ -8,7 +8,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from ..core.constants import (
     MINIMAX_EXPRESSIVE_MODELS,
@@ -28,6 +28,7 @@ _PAUSE_TAG_RE = re.compile(r"<#\s*(\d{1,2}(?:\.\d{1,2})?)\s*#>")
 _STRICT_MEME_TAG_RE = re.compile(r"&&([^&\n]+)&&")
 _BRACKET_MEME_TAG_RE = re.compile(r"\[([^\[\]\n]+)\](?!\()")
 _PAREN_MEME_TAG_RE = re.compile(r"\(([^()\n]+)\)")
+_MIMO_PERFORMANCE_TAG_RE = re.compile(r"[（(]\s*([^（）()\n]{1,24})\s*[）)]")
 _ASCII_CONTROL_TAG_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,23}$")
 _REFERENCE_CODE_EXCLUSION_RES = [
     re.compile(pattern, re.IGNORECASE) for pattern in INLINE_CODE_EXCLUSIONS
@@ -65,19 +66,46 @@ class SpeechTextSanitizer:
         self._meme_tags_cache: Optional[set[str]] = None
         self._meme_tags_cache_mtime: Optional[float] = None
 
-    def prepare(self, text: str, *, provider: str, model: str) -> PreparedSpeechText:
+    def prepare(
+        self,
+        text: str,
+        *,
+        provider: str,
+        model: str,
+        mimo_performance_tags_enable: bool = False,
+        mimo_performance_tags: Optional[Sequence[str]] = None,
+    ) -> PreparedSpeechText:
         raw_text = self.marker_processor.normalize_text(text or "")
         cleaned_text, detected_emotion = self.marker_processor.strip_head_many(raw_text)
         cleaned_text = self.marker_processor.strip_all_visible_markers(cleaned_text)
 
-        meme_cleaned_text, meme_tags = self._strip_meme_tags(cleaned_text)
+        keep_mimo_performance_tags = (
+            self._should_keep_mimo_performance_tags(provider)
+            and bool(mimo_performance_tags_enable)
+        )
+        mimo_tag_whitelist = self._normalize_mimo_performance_tags(mimo_performance_tags)
+
+        meme_cleaned_text, meme_tags = self._strip_meme_tags(
+            cleaned_text,
+            preserve_tags=mimo_tag_whitelist if self._should_keep_mimo_performance_tags(provider) else None,
+        )
         display_base, pause_tags = self._handle_pause_tags(meme_cleaned_text, keep=False)
         display_base, voice_tags = self._handle_voice_tags(display_base, keep=False)
+        display_base, performance_tags = self._handle_mimo_performance_tags(
+            display_base,
+            tags=mimo_tag_whitelist,
+            keep=False,
+        )
 
         keep_minimax_controls = self._should_keep_minimax_controls(provider)
         keep_voice_tags = keep_minimax_controls and self._supports_expressive_tags(model)
         tts_base, _ = self._handle_pause_tags(meme_cleaned_text, keep=keep_minimax_controls)
         tts_base, _ = self._handle_voice_tags(tts_base, keep=keep_voice_tags)
+        tts_base, _ = self._handle_mimo_performance_tags(
+            tts_base,
+            tags=mimo_tag_whitelist,
+            keep=keep_mimo_performance_tags,
+        )
 
         display_processed = self.extractor.process_text(display_base)
         tts_processed = self.extractor.process_text(
@@ -95,6 +123,7 @@ class SpeechTextSanitizer:
             "meme": meme_tags,
             "pause": pause_tags,
             "minimax_voice": voice_tags,
+            "mimo_performance": performance_tags,
         }
         matched_tags = {key: value for key, value in matched_tags.items() if value}
 
@@ -113,6 +142,18 @@ class SpeechTextSanitizer:
 
     def _supports_expressive_tags(self, model: str) -> bool:
         return str(model or "").strip().lower() in MINIMAX_EXPRESSIVE_MODELS
+
+    def _should_keep_mimo_performance_tags(self, provider: str) -> bool:
+        return str(provider or "").strip().lower() == "mimo"
+
+    @staticmethod
+    def _normalize_mimo_performance_tags(tags: Optional[Sequence[str]]) -> Set[str]:
+        normalized: Set[str] = set()
+        for tag in tags or []:
+            value = str(tag or "").strip()
+            if value:
+                normalized.add(value)
+        return normalized
 
     @staticmethod
     def _inline_code_inner(code: str) -> str:
@@ -169,7 +210,12 @@ class SpeechTextSanitizer:
         self._meme_tags_cache_mtime = current_mtime
         return tags
 
-    def _strip_meme_tags(self, text: str) -> Tuple[str, List[str]]:
+    def _strip_meme_tags(
+        self,
+        text: str,
+        *,
+        preserve_tags: Optional[Set[str]] = None,
+    ) -> Tuple[str, List[str]]:
         valid_tags = self._load_meme_tags()
         if not text:
             return text, []
@@ -177,8 +223,11 @@ class SpeechTextSanitizer:
         matched: List[str] = []
 
         def _replace_if_needed(match: re.Match, *, wrapped_kind: str) -> str:
-            tag = (match.group(1) or "").strip().lower()
+            raw_tag = (match.group(1) or "").strip()
+            tag = raw_tag.lower()
             if not tag:
+                return match.group(0)
+            if preserve_tags and raw_tag in preserve_tags:
                 return match.group(0)
             if not self._should_strip_tag(
                 tag,
@@ -252,6 +301,28 @@ class SpeechTextSanitizer:
             return match.group(0) if keep else ""
 
         return _VOICE_TAG_RE.sub(_replace, text), self._dedupe_preserve_order(matched)
+
+    def _handle_mimo_performance_tags(
+        self,
+        text: str,
+        *,
+        tags: Set[str],
+        keep: bool,
+    ) -> Tuple[str, List[str]]:
+        if not text or not tags:
+            return text, []
+
+        matched: List[str] = []
+
+        def _replace(match: re.Match) -> str:
+            tag = (match.group(1) or "").strip()
+            if tag not in tags:
+                return match.group(0)
+            normalized = f"（{tag}）"
+            matched.append(normalized)
+            return normalized if keep else ""
+
+        return _MIMO_PERFORMANCE_TAG_RE.sub(_replace, text), self._dedupe_preserve_order(matched)
 
     def _cleanup_visible_text(self, text: str, *, keep_newlines: bool) -> str:
         if not text:

@@ -46,6 +46,8 @@ class TTSProcessingResult:
     voice: Optional[str] = None
     speed: float = 1.0
     style_overrides: Optional[Dict[str, str]] = None
+    director_prompt: Optional[str] = None
+    performance_tags: Optional[List[str]] = None
     text: str = ""
     success: bool = False
     error: str = ""
@@ -203,6 +205,10 @@ class TTSProcessor:
             result.emotion = emotion
             style_overrides = session_state.consume_pending_style_overrides()
             result.style_overrides = style_overrides
+            director_prompt = session_state.consume_pending_director_prompt()
+            result.director_prompt = director_prompt
+            performance_tags = session_state.consume_pending_performance_tags()
+            result.performance_tags = performance_tags
             pending_voice = session_state.consume_pending_voice()
 
             # 2. 选择音色
@@ -226,7 +232,15 @@ class TTSProcessor:
             speed = self.get_speed_for_emotion(emotion)
             result.speed = speed
 
-            logger.info(f"TTS: emotion={emotion}, voice={voice_key}, speed={speed}, styles={style_overrides}")
+            logger.info(
+                "TTS: emotion=%s, voice=%s, speed=%s, styles=%s, director=%s, performance_tags=%s",
+                emotion,
+                voice_key,
+                speed,
+                style_overrides,
+                bool(director_prompt),
+                performance_tags,
+            )
 
             # 4. 生成音频
             audio_path = await self.generate_audio(
@@ -235,6 +249,8 @@ class TTSProcessor:
                 speed,
                 emotion=emotion,
                 style_overrides=style_overrides,
+                director_prompt=director_prompt,
+                performance_tags=performance_tags,
             )
 
             if audio_path:
@@ -324,6 +340,8 @@ class TTSProcessor:
         *,
         emotion: Optional[str] = None,
         style_overrides: Optional[Dict[str, str]] = None,
+        director_prompt: Optional[str] = None,
+        performance_tags: Optional[List[str]] = None,
     ) -> Optional[Path]:
         """生成 TTS 音频。"""
         try:
@@ -335,6 +353,8 @@ class TTSProcessor:
                     speed=speed,
                     emotion=emotion,
                     style_overrides=style_overrides,
+                    director_prompt=director_prompt,
+                    performance_tags=performance_tags,
                 )
             else:
                 audio_path = await self.tts.synth(

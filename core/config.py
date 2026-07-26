@@ -44,6 +44,7 @@ from .constants import (
     DEFAULT_TEXT_VOICE_ENABLE,
     DEFAULT_TTS_PROVIDER,
     DEFAULT_VOICE_OUTPUT_ENABLE,
+    MIMO_PERFORMANCE_TAGS,
     MIMO_STYLE_CATEGORIES,
 )
 
@@ -244,6 +245,13 @@ class ConfigManager:
             "dialect": "",
             "role_play": "",
             "seed_text": "",
+            "director_enable": False,
+            "director_role": "",
+            "director_scene": "",
+            "director_instruction": "",
+            "director_context": "",
+            "performance_tags_enable": False,
+            "performance_tags": list(MIMO_PERFORMANCE_TAGS),
         }
         for k, v in mi_defaults.items():
             if k not in mi:
@@ -502,6 +510,13 @@ class ConfigManager:
                 "dialect": str(mi.get("dialect", "")),
                 "role_play": str(mi.get("role_play", "")),
                 "seed_text": str(mi.get("seed_text", "")),
+                "director_enable": bool(mi.get("director_enable", False)),
+                "director_role": str(mi.get("director_role", "")),
+                "director_scene": str(mi.get("director_scene", "")),
+                "director_instruction": str(mi.get("director_instruction", "")),
+                "director_context": str(mi.get("director_context", "")),
+                "performance_tags_enable": bool(mi.get("performance_tags_enable", False)),
+                "performance_tags": list(mi.get("performance_tags", list(MIMO_PERFORMANCE_TAGS)) or []),
                 "gain": 0.0,
                 "vol": DEFAULT_MINIMAX_VOL,
                 "pitch": DEFAULT_MINIMAX_PITCH,

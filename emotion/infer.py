@@ -14,10 +14,20 @@ DEFAULT_KEYWORDS: Dict[str, Set[str]] = {
 
 URL_RE: Pattern = re.compile(r"https?://|www\.")
 SING_INTENT_RE: Pattern = re.compile(
-    r"(唱(?:首|一首|一句|歌)?|来(?:首|一首)|献唱|哼(?:首|一段)?|"
-    r"歌曲|歌词|开嗓|清唱|唱给|大海啊大海)",
+    r"(\b(?:sing|singing)\b|唱歌|唱一?首(?:歌)?|唱首歌|唱一句|"
+    r"来一?首(?:歌)?|给.+唱|唱给|献唱|清唱|哼一?段|哼首|开嗓|大海啊大海)",
     re.I,
 )
+WEAK_SING_KEYWORDS = {"唱", "歌", "歌曲", "歌词"}
+
+
+def _is_strong_sing_keyword(keyword: str, text: str, lowered: str) -> bool:
+    word = str(keyword or "").strip()
+    if not word or word in WEAK_SING_KEYWORDS:
+        return False
+    if word.lower() in {"sing", "singing"}:
+        return bool(re.search(rf"\b{re.escape(word)}\b", lowered, re.I))
+    return word in text
 # 代码块检测
 CODE_BLOCK_RE: Pattern = re.compile(r'```[a-zA-Z0-9_+-]*\n.*?\n```', re.DOTALL)
 INLINE_CODE_RE: Pattern = re.compile(r'`([^`\n]+)`')
@@ -59,7 +69,7 @@ def classify(text: str, context: Optional[List[str]] = None, keywords: Optional[
 
     # 唱歌是明确意图，不应该被感叹号或其他情绪抢走。
     for w in kw_map.get("sing", set()):
-        if w and w.lower() in t:
+        if _is_strong_sing_keyword(w, text or "", t):
             return "sing"
 
     score: Dict[str, float] = {emo: 0.0 for emo in EMOTIONS if emo not in ("neutral", "sing")}

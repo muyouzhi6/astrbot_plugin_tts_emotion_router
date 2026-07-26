@@ -40,6 +40,9 @@ class SessionState:
     pending_emotion: Optional[str] = None
     pending_style_overrides: Optional[Dict[str, str]] = None
     pending_voice: Optional[str] = None
+    pending_director_prompt: Optional[str] = None
+    pending_performance_tags: Optional[List[str]] = None
+    pending_direct_speak_text: Optional[str] = None
     last_emotion: Optional[str] = None
     last_voice: Optional[str] = None
     last_tts_content: Optional[str] = None
@@ -221,6 +224,40 @@ class SessionState:
         voice = self.pending_voice
         self.pending_voice = None
         return voice
+
+    def set_pending_director_prompt(self, prompt: str) -> None:
+        cleaned = str(prompt or "").strip()
+        self.pending_director_prompt = cleaned or None
+
+    def consume_pending_director_prompt(self) -> Optional[str]:
+        prompt = self.pending_director_prompt
+        self.pending_director_prompt = None
+        return prompt
+
+    def set_pending_performance_tags(self, tags: Sequence[str]) -> None:
+        cleaned: List[str] = []
+        seen = set()
+        for tag in tags or []:
+            value = str(tag or "").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            cleaned.append(value)
+        self.pending_performance_tags = cleaned or None
+
+    def consume_pending_performance_tags(self) -> List[str]:
+        tags = self.pending_performance_tags or []
+        self.pending_performance_tags = None
+        return list(tags)
+
+    def set_pending_direct_speak_text(self, text: str) -> None:
+        cleaned = str(text or "").strip()
+        self.pending_direct_speak_text = cleaned or None
+
+    def consume_pending_direct_speak_text(self) -> Optional[str]:
+        text = self.pending_direct_speak_text
+        self.pending_direct_speak_text = None
+        return text
 
     def is_cooldown_expired(self, cooldown: int) -> bool:
         """

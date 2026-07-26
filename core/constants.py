@@ -47,6 +47,22 @@ MIMO_STYLE_HINTS: Dict[str, str] = {
     for category, labels in MIMO_STYLE_CATEGORIES.items()
 }
 
+# MiMo performance tags are explicit stage directions written by the user/LLM.
+# They are not inferred or auto-inserted; the sanitizer only keeps whitelisted
+# parenthesized tags in TTS text when the feature is enabled for MiMo.
+MIMO_PERFORMANCE_TAG_CATEGORIES: Dict[str, Tuple[str, ...]] = {
+    "rhythm": ("吸气", "深呼吸", "叹气", "长叹一口气", "喘息", "屏息"),
+    "emotion_state": ("紧张", "害怕", "激动", "疲惫", "委屈", "撒娇", "心虚", "震惊", "不耐烦"),
+    "voice_feature": ("颤抖", "声音颤抖", "变调", "破音", "鼻音", "气声", "沙哑"),
+    "cry_laugh": ("笑", "轻笑", "大笑", "冷笑", "抽泣", "呜咽", "哽咽", "嚎啕大哭"),
+}
+MIMO_PERFORMANCE_TAGS: Tuple[str, ...] = tuple(
+    tag
+    for tags in MIMO_PERFORMANCE_TAG_CATEGORIES.values()
+    for tag in tags
+)
+MIMO_PERFORMANCE_TAG_HINT: str = " / ".join(MIMO_PERFORMANCE_TAGS)
+
 INVISIBLE_CHARS: List[str] = [
     "\ufeff",
     "\u200b",

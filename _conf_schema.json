@@ -294,6 +294,82 @@
             "default": "",
             "hint": "自由补充 MiMo 风格标签；可留空。优先使用上方五个结构化配置项，只有无法归类时再填写这里。"
           },
+          "director_enable": {
+            "type": "bool",
+            "description": "导演模式",
+            "default": false,
+            "hint": "启用后，会把角色/场景/指导等自然语言控制作为 user 消息发送给 MiMo；这些内容不会被朗读。"
+          },
+          "director_role": {
+            "type": "string",
+            "description": "导演角色",
+            "default": "",
+            "hint": "例如：温柔但疲惫的少女、冷静专业的旁白、刚哭过但强撑着安慰别人的朋友。"
+          },
+          "director_scene": {
+            "type": "string",
+            "description": "导演场景",
+            "default": "",
+            "hint": "例如：深夜电话、雨中告别、轻松直播聊天、严肃会议播报。"
+          },
+          "director_instruction": {
+            "type": "text",
+            "description": "导演指导",
+            "default": "",
+            "hint": "自然语言描述语音表演方式，例如：语速稍慢，带一点哽咽和克制，不要夸张。"
+          },
+          "director_context": {
+            "type": "text",
+            "description": "导演上下文",
+            "default": "",
+            "hint": "可选对话/剧情背景，不会被朗读；用于帮助 MiMo 理解本次语音应该如何表演。"
+          },
+          "performance_tags_enable": {
+            "type": "bool",
+            "description": "表演标签白名单",
+            "default": false,
+            "hint": "默认关闭。开启后，仅 MiMo 会把用户/LLM 显式写出的白名单括号标签透传给 TTS，例如（叹气）/（轻笑）；不会自动插入标签，展示文本会移除这些标签。"
+          },
+          "performance_tags": {
+            "type": "list",
+            "description": "表演标签列表",
+            "default": [
+              "吸气",
+              "深呼吸",
+              "叹气",
+              "长叹一口气",
+              "喘息",
+              "屏息",
+              "紧张",
+              "害怕",
+              "激动",
+              "疲惫",
+              "委屈",
+              "撒娇",
+              "心虚",
+              "震惊",
+              "不耐烦",
+              "颤抖",
+              "声音颤抖",
+              "变调",
+              "破音",
+              "鼻音",
+              "气声",
+              "沙哑",
+              "笑",
+              "轻笑",
+              "大笑",
+              "冷笑",
+              "抽泣",
+              "呜咽",
+              "哽咽",
+              "嚎啕大哭"
+            ],
+            "hint": "可删减白名单；只有这里列出的括号标签才会透传。可选：吸气 / 深呼吸 / 叹气 / 长叹一口气 / 喘息 / 屏息 / 紧张 / 害怕 / 激动 / 疲惫 / 委屈 / 撒娇 / 心虚 / 震惊 / 不耐烦 / 颤抖 / 声音颤抖 / 变调 / 破音 / 鼻音 / 气声 / 沙哑 / 笑 / 轻笑 / 大笑 / 冷笑 / 抽泣 / 呜咽 / 哽咽 / 嚎啕大哭",
+            "items": {
+              "type": "string"
+            }
+          },
           "seed_text": {
             "type": "string",
             "description": "可选 user 消息",

@@ -52,6 +52,7 @@ from .core.constants import (
     DEFAULT_TEST_TEXT,
     MINIMAX_EXPRESSIVE_MODELS,
     MINIMAX_EXPRESSIVE_TAGS,
+    MIMO_PERFORMANCE_TAGS,
 )
 from .core.session import SessionState
 from .core.config import ConfigManager
@@ -192,6 +193,11 @@ class TTSEmotionRouter(Star):
                 role_play=api_cfg.get("role_play", ""),
                 seed_text=api_cfg.get("seed_text", ""),
                 sing_voice=api_cfg.get("sing_voice", ""),
+                director_enable=api_cfg.get("director_enable", False),
+                director_role=api_cfg.get("director_role", ""),
+                director_scene=api_cfg.get("director_scene", ""),
+                director_instruction=api_cfg.get("director_instruction", ""),
+                director_context=api_cfg.get("director_context", ""),
             )
 
         return SiliconFlowTTS(
@@ -210,7 +216,7 @@ class TTSEmotionRouter(Star):
         api_cfg = self.config.get_api_config()
         keys = (
             "provider", "url", "key", "model", "format", "speed", "gain", "sample_rate",
-            "voice_id", "voice", "sing_voice", "overall_tone", "timbre_positioning", "persona_accent", "dialect", "role_play", "vol", "pitch", "emotion", "bitrate", "channel", "subtitle_enable",
+            "voice_id", "voice", "sing_voice", "overall_tone", "timbre_positioning", "persona_accent", "dialect", "role_play", "director_enable", "director_role", "director_scene", "director_instruction", "director_context", "performance_tags_enable", "performance_tags", "vol", "pitch", "emotion", "bitrate", "channel", "subtitle_enable",
             "output_format", "language_boost", "proxy", "voice_modify", "timber_weights",
             "pronunciation_dict", "aigc_watermark", "max_retries", "timeout",
         )
@@ -716,6 +722,8 @@ class TTSEmotionRouter(Star):
             text or "",
             provider=str(api_cfg.get("provider", "") or ""),
             model=str(api_cfg.get("model", "") or ""),
+            mimo_performance_tags_enable=bool(api_cfg.get("performance_tags_enable", False)),
+            mimo_performance_tags=api_cfg.get("performance_tags", []),
         )
 
     def _prepare_visible_text(self, text: str) -> str:
@@ -773,7 +781,61 @@ class TTSEmotionRouter(Star):
             logging.error("manual tts send failed: %s", e)
             return f"发送失败：{e}"
 
-    def _extract_temporary_voice_directives(self, text: str) -> Tuple[Optional[str], Dict[str, str], Optional[str]]:
+    def _extract_temporary_performance_tags(self, text: str) -> List[str]:
+        api_cfg = self.config.get_api_config()
+        if self.config.get_tts_provider() != "mimo" or not bool(api_cfg.get("performance_tags_enable", False)):
+            return []
+        whitelist = {
+            str(tag or "").strip()
+            for tag in (api_cfg.get("performance_tags") or MIMO_PERFORMANCE_TAGS)
+            if str(tag or "").strip()
+        }
+        if not whitelist:
+            return []
+
+        raw = str(text or "")
+        matched: List[str] = []
+        seen = set()
+
+        # Explicit bracket tags in a director prompt: “开头带（叹气）”.
+        for match in re.finditer(r"[（(]\s*([^（）()\n]{1,24})\s*[）)]", raw):
+            tag = (match.group(1) or "").strip()
+            if tag not in whitelist or tag in seen:
+                continue
+            seen.add(tag)
+            matched.append(tag)
+
+        # Natural-language director prompt: “叹气地说 / 带一点哽咽 / 轻笑一下”.
+        # Prefer longer tags first so “声音颤抖” wins over “颤抖”.
+        for tag in sorted(whitelist, key=len, reverse=True):
+            if tag in seen:
+                continue
+            if re.search(re.escape(tag), raw):
+                seen.add(tag)
+                matched.append(tag)
+
+        return matched
+
+    def _extract_direct_speak_text(self, director_prompt: str) -> Optional[str]:
+        prompt = str(director_prompt or "").strip()
+        if not prompt:
+            return None
+        if not re.search(r"(?:念出|朗读|读出|直接读|原文|这段话|以下内容|下面这段)", prompt):
+            return None
+        quote_patterns = (
+            r'[“"](?P<text>.+?)[”"]',
+            r"[‘\'](?P<text>.+?)[’\']",
+            r"「(?P<text>.+?)」",
+            r"『(?P<text>.+?)』",
+        )
+        for pattern in quote_patterns:
+            matches = list(re.finditer(pattern, prompt, re.S))
+            if matches:
+                value = (matches[-1].group("text") or "").strip()
+                return value[:2000] if value else None
+        return None
+
+    def _extract_temporary_voice_directives(self, text: str) -> Tuple[Optional[str], Dict[str, str], Optional[str], Optional[str]]:
         """Extract one-turn MiMo style/emotion/voice directives from user text.
 
         Voice names are only accepted with an explicit speech context such as
@@ -782,7 +844,7 @@ class TTSEmotionRouter(Star):
         """
         raw = str(text or "")
         if not raw.strip():
-            return None, {}, None
+            return None, {}, None, None
 
         pending_emotion: Optional[str] = None
         for zh_label, emotion_key in MIMO_EMOTION_TAGS_REVERSE.items():
@@ -804,7 +866,21 @@ class TTSEmotionRouter(Star):
                 pending_voice = voice_name
                 break
 
-        return pending_emotion, style_overrides, pending_voice
+        pending_director: Optional[str] = None
+        director_patterns = (
+            r"(?:用这种语音风格|语音导演|导演指导|语音指导|本次语音指导|临时语音指导|按这个风格说|按这种风格说)\s*[:：]\s*(?P<prompt>.+)",
+            r'(?:用|按)\s*(?P<prompt>[^。！？!?"“”]{2,80}?)\s*(?:的)?\s*(?:语音风格|说话风格|表演方式)\s*(?:说|讲|朗读)',
+        )
+        for pattern in director_patterns:
+            m = re.search(pattern, raw, re.I | re.S)
+            if m:
+                candidate = (m.group("prompt") or "").strip()
+                candidate = re.split(r"(?:\n|。|！|？|!|\?)", candidate, maxsplit=1)[0].strip()
+                if candidate:
+                    pending_director = candidate[:300]
+                    break
+
+        return pending_emotion, style_overrides, pending_voice, pending_director
 
     def _publish_temporary_voice_directives(self, event: AstrMessageEvent, text: str) -> None:
         # MiMo-only: these directives use MiMo preset voices and Chinese style tags.
@@ -812,8 +888,9 @@ class TTSEmotionRouter(Star):
         if self.config.get_tts_provider() != "mimo":
             return
 
-        emotion, style_overrides, pending_voice = self._extract_temporary_voice_directives(text)
-        if not emotion and not style_overrides and not pending_voice:
+        emotion, style_overrides, pending_voice, pending_director = self._extract_temporary_voice_directives(text)
+        performance_tags = self._extract_temporary_performance_tags(pending_director or "")
+        if not emotion and not style_overrides and not pending_voice and not pending_director and not performance_tags:
             return
         st = self._get_session_state(self._get_umo(event))
         if emotion:
@@ -822,12 +899,21 @@ class TTSEmotionRouter(Star):
             st.set_pending_style_overrides(style_overrides)
         if pending_voice:
             st.set_pending_voice(pending_voice)
+        if pending_director:
+            st.set_pending_director_prompt(pending_director)
+            direct_speak_text = self._extract_direct_speak_text(pending_director)
+            if direct_speak_text:
+                st.set_pending_direct_speak_text(direct_speak_text)
+        if performance_tags:
+            st.set_pending_performance_tags(performance_tags)
         logger.info(
-            "temporary MiMo voice directives sid=%s emotion=%s styles=%s voice=%s",
+            "temporary MiMo voice directives sid=%s emotion=%s styles=%s voice=%s director=%s performance_tags=%s",
             self._get_umo(event),
             emotion,
             style_overrides,
             pending_voice,
+            bool(pending_director),
+            performance_tags,
         )
 
     # ---------------- llm hooks ----------------
@@ -1010,6 +1096,12 @@ class TTSEmotionRouter(Star):
             return
 
         text = self._normalize_text(" ".join(text_parts))
+        st = self._get_session_state(umo)
+        direct_speak_text = st.consume_pending_direct_speak_text()
+        if direct_speak_text:
+            text = self._normalize_text(direct_speak_text)
+            result.chain = [Plain(text=text)]
+
         prepared = self._prepare_text_for_tts(text)
         tts_text = (prepared.tts_text or "").strip()
         display_text = (prepared.display_text or "").strip()
@@ -1033,7 +1125,6 @@ class TTSEmotionRouter(Star):
             result.chain = display_chain
             return
 
-        st = self._get_session_state(umo)
         allowed_components = {"Plain", "At", "Reply", "Image", "Face"}
         has_non_plain = any(type(c).__name__ not in allowed_components for c in result.chain)
 

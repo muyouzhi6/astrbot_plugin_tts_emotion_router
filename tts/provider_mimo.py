@@ -7,7 +7,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 import aiohttp
 import asyncio
@@ -140,6 +140,11 @@ class MiMoTTS:
         timbre_positioning: str = "",
         persona_accent: str = "",
         role_play: str = "",
+        director_enable: bool = False,
+        director_role: str = "",
+        director_scene: str = "",
+        director_instruction: str = "",
+        director_context: str = "",
     ):
         self.api_url = (api_url or "https://api.xiaomimimo.com/v1").rstrip("/")
         self.api_key = api_key or ""
@@ -156,6 +161,11 @@ class MiMoTTS:
         self.dialect = dialect
         self.role_play = role_play
         self.seed_text = seed_text
+        self.director_enable = bool(director_enable)
+        self.director_role = director_role
+        self.director_scene = director_scene
+        self.director_instruction = director_instruction
+        self.director_context = director_context
         # Empty sing_voice means "follow the main/default voice".  Use a
         # concrete main voice such as 冰糖/茉莉 if you need stable timbre; the
         # MiMo backend alias "mimo_default" may vary by deployment cluster.
@@ -168,53 +178,83 @@ class MiMoTTS:
             await self._session.close()
             self._session = None
 
-    def _build_style_prefix(self, emotion_tag: Optional[str] = None, style_overrides: Optional[Dict[str, str]] = None) -> str:
-        """构建情绪标签前缀
+    def _build_style_prefix(
+        self,
+        emotion_tag: Optional[str] = None,
+        style_overrides: Optional[Dict[str, str]] = None,
+        performance_tags: Optional[Sequence[str]] = None,
+    ) -> str:
+        """构建 MiMo 控制标签前缀。
 
-        根据小米官方文档，情绪标签使用括号格式：
-        - (唱歌)文本
-        - (开心)文本
-        - （唱歌）文本（全角括号也可以）
-
-        Args:
-            emotion_tag: 情绪标签（如"唱歌"、"开心"等）
-
-        Returns:
-            括号格式的情绪标签字符串，如果没有情绪标签则返回空字符串
+        情绪/风格标签保持原有聚合形式；表演标签是显式舞台动作，
+        需要独立括号透传，避免被拼成“平静、叹气”后无法识别。
         """
         style_parts: list[str] = []
 
-        # 优先使用传入的情绪标签
         if emotion_tag:
             style_parts.append(emotion_tag)
 
         overrides = style_overrides or {}
-
         for field in MIMO_STYLE_FIELD_NAMES:
             value = str(overrides.get(field) or getattr(self, field, "") or "").strip()
             if value:
                 style_parts.append(value)
 
-        # 兼容旧配置：额外自由风格标签仍可叠加在最后。
         if self.style_prompt.strip():
             style_parts.append(self.style_prompt.strip())
 
+        prefixes: list[str] = []
+        seen_performance = set()
+        for tag in performance_tags or []:
+            value = str(tag or "").strip()
+            if not value or value in seen_performance:
+                continue
+            seen_performance.add(value)
+            prefixes.append(f"（{value}）")
+
         style_content = "、".join(style_parts).strip()
-        if not style_content:
-            return ""
+        if style_content:
+            prefixes.append(f"（{style_content}）")
 
-        # 使用括号格式（小米官方文档推荐）
-        return f"（{style_content}）"
+        return "".join(prefixes)
 
-    def _build_user_prompt(self) -> Optional[str]:
-        """构建 user prompt.
+    def _build_user_prompt(self, temporary_director_prompt: Optional[str] = None) -> Optional[str]:
+        """构建不会被朗读的 user prompt。
 
-        Per MiMo docs, user messages are optional natural-language style
-        instructions or conversation history and are not spoken.  Leave empty
-        by default; do not inject arbitrary seed text.
+        MiMo 支持在 user message 中放自然语言风格指令/对话历史。
+        这里将旧的 seed_text 与新的导演模式字段合并，最终只生成一条
+        user message，避免把控制指令混入 assistant 待朗读文本。
         """
+        parts: list[str] = []
         seed_text = self.seed_text.strip()
-        return seed_text if seed_text else None
+        if seed_text:
+            parts.append(seed_text)
+
+        if self.director_enable:
+            director_parts: list[str] = []
+            role = self.director_role.strip()
+            scene = self.director_scene.strip()
+            instruction = self.director_instruction.strip()
+            context = self.director_context.strip()
+            if role:
+                director_parts.append(f"角色：{role}")
+            if scene:
+                director_parts.append(f"场景：{scene}")
+            if instruction:
+                director_parts.append(f"指导：{instruction}")
+            if context:
+                director_parts.append(f"上下文：{context}")
+            if director_parts:
+                parts.append(
+                    "请按以下导演模式进行语音表演，这些要求不要朗读出来：\n"
+                    + "\n".join(director_parts)
+                )
+
+        temp_prompt = str(temporary_director_prompt or "").strip()
+        if temp_prompt:
+            parts.append("本次临时语音指导：" + temp_prompt)
+
+        return "\n\n".join(parts).strip() or None
 
     def _prepare_strict_sing_text(self, text: str) -> str:
         """把用户/LLM 的唱歌式回复压成更像歌词的文本。
@@ -276,6 +316,8 @@ class MiMoTTS:
         *,
         strict_sing: bool = False,
         style_overrides: Optional[Dict[str, str]] = None,
+        temporary_director_prompt: Optional[str] = None,
+        performance_tags: Optional[Sequence[str]] = None,
     ) -> dict:
         """构建 MiMo TTS API 请求 payload
 
@@ -289,7 +331,7 @@ class MiMoTTS:
         messages: list[dict[str, str]] = []
 
         # 添加 user prompt（seed text）
-        user_prompt = self._build_strict_sing_user_prompt() if strict_sing else self._build_user_prompt()
+        user_prompt = self._build_strict_sing_user_prompt() if strict_sing else self._build_user_prompt(temporary_director_prompt)
         if user_prompt:
             messages.append(
                 {
@@ -300,7 +342,11 @@ class MiMoTTS:
 
         # 构建 assistant content（带 style 标签）
         synth_text = self._prepare_strict_sing_text(text) if strict_sing else text
-        style_prefix = self._build_style_prefix(emotion_tag, style_overrides=style_overrides)
+        style_prefix = self._build_style_prefix(
+            emotion_tag,
+            style_overrides=style_overrides,
+            performance_tags=performance_tags,
+        )
         assistant_content = f"{style_prefix}{synth_text}" if style_prefix else synth_text
         if strict_sing:
             logger.info("MiMoTTS: strict singing content=%r", assistant_content[:200])
@@ -333,6 +379,8 @@ class MiMoTTS:
         *,
         emotion: Optional[str] = None,
         style_overrides: Optional[Dict[str, str]] = None,
+        director_prompt: Optional[str] = None,
+        performance_tags: Optional[Sequence[str]] = None,
     ) -> Optional[Path]:
         """合成语音
 
@@ -399,6 +447,8 @@ class MiMoTTS:
                     "f": self.format,
                     "strict_sing": STRICT_SING_CACHE_VERSION if strict_sing else "",
                     "style_overrides": style_overrides or {},
+                    "director_prompt": director_prompt or "",
+                    "performance_tags": list(performance_tags or []),
                 },
                 ensure_ascii=False,
             ).encode("utf-8")
@@ -423,6 +473,8 @@ class MiMoTTS:
             actual_voice=actual_voice,
             strict_sing=strict_sing,
             style_overrides=style_overrides,
+            temporary_director_prompt=director_prompt,
+            performance_tags=performance_tags,
         )
         if strict_sing:
             logger.info("MiMoTTS: strict singing mode enabled")
