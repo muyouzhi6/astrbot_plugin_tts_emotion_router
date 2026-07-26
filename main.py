@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import logging
 import time
 import heapq
@@ -40,6 +41,7 @@ from .core.constants import (
     PLUGIN_VERSION,
     TEMP_DIR,
     EMOTIONS,
+    MIMO_STYLE_LABEL_TO_CATEGORY,
     EMOTION_KEYWORDS,
     AUDIO_CLEANUP_TTL_SECONDS,
     SESSION_CLEANUP_INTERVAL_SECONDS,
@@ -60,6 +62,7 @@ from .core.text_splitter import TextSplitter
 from .emotion.classifier import HeuristicClassifier
 from .tts.provider_siliconflow import SiliconFlowTTS
 from .tts.provider_minimax import MiniMaxTTS
+from .tts.provider_mimo import MiMoTTS, MIMO_EMOTION_TAGS_REVERSE, MIMO_VOICES
 from .utils.audio import ensure_dir, cleanup_dir
 from .utils.extract import CodeAndLinkExtractor
 from .utils.text_sanitizer import PreparedSpeechText, SpeechTextSanitizer
@@ -171,6 +174,26 @@ class TTSEmotionRouter(Star):
                 timeout=api_cfg.get("timeout", 30),
             )
 
+        if provider == "mimo":
+            return MiMoTTS(
+                api_url=api_cfg["url"],
+                api_key=api_cfg["key"],
+                model=api_cfg["model"],
+                voice=api_cfg.get("voice", "mimo_default"),
+                fmt=api_cfg["format"],
+                speed=api_cfg["speed"],
+                max_retries=api_cfg.get("max_retries", 2),
+                timeout=api_cfg.get("timeout", 30),
+                style_prompt=api_cfg.get("style_prompt", ""),
+                overall_tone=api_cfg.get("overall_tone", ""),
+                timbre_positioning=api_cfg.get("timbre_positioning", ""),
+                persona_accent=api_cfg.get("persona_accent", ""),
+                dialect=api_cfg.get("dialect", ""),
+                role_play=api_cfg.get("role_play", ""),
+                seed_text=api_cfg.get("seed_text", ""),
+                sing_voice=api_cfg.get("sing_voice", ""),
+            )
+
         return SiliconFlowTTS(
             api_cfg["url"],
             api_cfg["key"],
@@ -187,7 +210,7 @@ class TTSEmotionRouter(Star):
         api_cfg = self.config.get_api_config()
         keys = (
             "provider", "url", "key", "model", "format", "speed", "gain", "sample_rate",
-            "voice_id", "vol", "pitch", "emotion", "bitrate", "channel", "subtitle_enable",
+            "voice_id", "voice", "sing_voice", "overall_tone", "timbre_positioning", "persona_accent", "dialect", "role_play", "vol", "pitch", "emotion", "bitrate", "channel", "subtitle_enable",
             "output_format", "language_boost", "proxy", "voice_modify", "timber_weights",
             "pronunciation_dict", "aigc_watermark", "max_retries", "timeout",
         )
@@ -712,6 +735,7 @@ class TTSEmotionRouter(Star):
             return False, [], "没有可用于语音合成的文本。"
 
         umo = self._get_umo(event)
+        self._publish_temporary_voice_directives(event, text)
         st = self._get_session_state(umo)
         proc_res = await self.tts_processor.process(tts_text, st)
         if not proc_res.success or not proc_res.audio_path:
@@ -749,11 +773,71 @@ class TTSEmotionRouter(Star):
             logging.error("manual tts send failed: %s", e)
             return f"发送失败：{e}"
 
+    def _extract_temporary_voice_directives(self, text: str) -> Tuple[Optional[str], Dict[str, str], Optional[str]]:
+        """Extract one-turn MiMo style/emotion/voice directives from user text.
+
+        Voice names are only accepted with an explicit speech context such as
+        “用冰糖的音色说” or “用 Mia 的声音说”, avoiding accidental triggers in
+        ordinary chat.
+        """
+        raw = str(text or "")
+        if not raw.strip():
+            return None, {}, None
+
+        pending_emotion: Optional[str] = None
+        for zh_label, emotion_key in MIMO_EMOTION_TAGS_REVERSE.items():
+            if emotion_key in EMOTIONS and zh_label in raw:
+                pending_emotion = emotion_key
+
+        style_overrides: Dict[str, str] = {}
+        for label, category in MIMO_STYLE_LABEL_TO_CATEGORY.items():
+            if label in raw:
+                style_overrides[category] = label
+
+        pending_voice: Optional[str] = None
+        for voice_name in sorted(MIMO_VOICES.keys(), key=len, reverse=True):
+            if voice_name == "mimo_default":
+                continue
+            # Strong context only: “用/换成/切到 + voice + 的? + 音色/声音/声线/嗓音”.
+            pattern = rf"(?:用|换成|切到|改成|使用|采用)\s*{re.escape(voice_name)}\s*(?:的)?\s*(?:音色|声音|声线|嗓音)"
+            if re.search(pattern, raw, re.I):
+                pending_voice = voice_name
+                break
+
+        return pending_emotion, style_overrides, pending_voice
+
+    def _publish_temporary_voice_directives(self, event: AstrMessageEvent, text: str) -> None:
+        # MiMo-only: these directives use MiMo preset voices and Chinese style tags.
+        # Do not leak them to MiniMax/SiliconFlow where they may be invalid voice ids.
+        if self.config.get_tts_provider() != "mimo":
+            return
+
+        emotion, style_overrides, pending_voice = self._extract_temporary_voice_directives(text)
+        if not emotion and not style_overrides and not pending_voice:
+            return
+        st = self._get_session_state(self._get_umo(event))
+        if emotion:
+            st.pending_emotion = emotion
+        if style_overrides:
+            st.set_pending_style_overrides(style_overrides)
+        if pending_voice:
+            st.set_pending_voice(pending_voice)
+        logger.info(
+            "temporary MiMo voice directives sid=%s emotion=%s styles=%s voice=%s",
+            self._get_umo(event),
+            emotion,
+            style_overrides,
+            pending_voice,
+        )
+
     # ---------------- llm hooks ----------------
 
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, request):
         try:
+            user_prompt = str(getattr(request, "prompt", "") or "")
+            if user_prompt:
+                self._publish_temporary_voice_directives(event, user_prompt)
             await self._inject_recent_spoken_assistant_context(event, request)
             marker_mode = self.publish_output_marker_mode(event)
             if not self._should_inject_minimax_prompt(event):
@@ -840,7 +924,7 @@ class TTSEmotionRouter(Star):
         try:
             umo = self._get_umo(event)
             st = self._get_session_state(umo)
-            if label in EMOTIONS:
+            if label in EMOTIONS and not st.pending_emotion:
                 st.pending_emotion = label
             if visible_text:
                 st.set_assistant_text(visible_text)
@@ -1284,7 +1368,13 @@ class TTSEmotionRouter(Star):
 
             ok, chain, history_or_error = await self._build_manual_tts_chain(event, content)
             if not ok:
-                yield history_or_error
+                logging.warning("tts_speak synthesis failed: %s", history_or_error)
+                event.clear_result()
+                # Do not expose the low-level failure text to the LLM.  If the
+                # model sees "audio generation failed", it tends to roleplay a
+                # broken voice ("嗓子被封印") and sends confusing fallback text.
+                yield None
+                yield "语音请求已处理。"
                 return
 
             history_text = history_or_error.strip()

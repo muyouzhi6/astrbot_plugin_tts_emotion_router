@@ -44,6 +44,7 @@ from .constants import (
     DEFAULT_TEXT_VOICE_ENABLE,
     DEFAULT_TTS_PROVIDER,
     DEFAULT_VOICE_OUTPUT_ENABLE,
+    MIMO_STYLE_CATEGORIES,
 )
 
 logger = logging.getLogger(__name__)
@@ -221,6 +222,34 @@ class ConfigManager:
                 sf[k] = v
         engine["siliconflow"] = sf
 
+        mi = engine.get("mimo", {}) or {}
+        # Keep MiMo settings as a first-class provider.  If an older config
+        # stored MiMo credentials under the siliconflow block, migrate them.
+        legacy_is_mimo = str(sf.get("url", "")).rstrip("/") in {
+            "https://token-plan-cn.xiaomimimo.com/v1",
+            "https://api.xiaomimimo.com/v1",
+        } or str(sf.get("model", "")).lower().startswith("mimo-")
+        mi_defaults = {
+            "url": sf.get("url") if legacy_is_mimo else "https://token-plan-cn.xiaomimimo.com/v1",
+            "key": sf.get("key") if legacy_is_mimo else "",
+            "model": sf.get("model") if legacy_is_mimo else "mimo-v2.5-tts",
+            "voice": "mimo_default",
+            "sing_voice": "",
+            "format": sf.get("format", DEFAULT_API_FORMAT),
+            "speed": sf.get("speed", DEFAULT_API_SPEED),
+            "style_prompt": "",
+            "overall_tone": "",
+            "timbre_positioning": "",
+            "persona_accent": "",
+            "dialect": "",
+            "role_play": "",
+            "seed_text": "",
+        }
+        for k, v in mi_defaults.items():
+            if k not in mi:
+                mi[k] = v
+        engine["mimo"] = mi
+
         mm = engine.get("minimax", {}) or {}
         mm_defaults = {
             "url": DEFAULT_MINIMAX_URL,
@@ -271,6 +300,21 @@ class ConfigManager:
                 "请在回复开头添加 [EMO:happy|sad|angry|neutral]，该标记仅供系统解析，不对用户显示。"
             )
         route["marker"] = marker
+
+        # Keep voice_map provider-neutral. MiMo converts emotion/sing keys to
+        # Chinese style tags inside provider_mimo when the map is left empty.
+        route["voice_map"] = route.get("voice_map", {}) or {}
+
+        speed_map = route.get("speed_map", {}) or {}
+        if "sing" not in speed_map:
+            speed_map["sing"] = 1.0
+        route["speed_map"] = speed_map
+
+        keywords = route.get("keywords", {}) or {}
+        if "sing" not in keywords:
+            keywords["sing"] = ["sing", "singing", "唱歌", "唱首歌", "来首歌", "唱", "歌"]
+        route["keywords"] = keywords
+
         self._config["emotion_route"] = route
 
         # Segmented TTS
@@ -381,7 +425,7 @@ class ConfigManager:
     def get_tts_provider(self) -> str:
         engine = self.get("tts_engine", {}) or {}
         provider = str(engine.get("provider", DEFAULT_TTS_PROVIDER)).strip().lower()
-        return provider if provider in {"siliconflow", "minimax"} else DEFAULT_TTS_PROVIDER
+        return provider if provider in {"siliconflow", "minimax", "mimo"} else DEFAULT_TTS_PROVIDER
 
     def is_emotion_route_enabled(self) -> bool:
         return bool((self.get("emotion_route", {}) or {}).get("enable", True))
@@ -436,6 +480,38 @@ class ConfigManager:
                 "gain": 0.0,
             }
 
+        if provider == "mimo":
+            mi = engine.get("mimo", {}) or {}
+            return {
+                "provider": "mimo",
+                "url": str(mi.get("url", "https://api.xiaomimimo.com/v1")).rstrip("/"),
+                "key": str(mi.get("key", "")),
+                "model": str(mi.get("model", "mimo-v2.5-tts")),
+                "voice": str(mi.get("voice", "mimo_default")),
+                "sing_voice": str(mi.get("sing_voice", "")),
+                "format": str(mi.get("format", "mp3")).lower(),
+                "speed": _safe_float(mi.get("speed"), DEFAULT_API_SPEED),
+                "timeout": timeout,
+                "max_retries": max_retries,
+                "default_voice": str(mi.get("voice", "mimo_default")),
+                "voice_id": str(mi.get("voice", "mimo_default")),
+                "style_prompt": str(mi.get("style_prompt", "")),
+                "overall_tone": str(mi.get("overall_tone", "")),
+                "timbre_positioning": str(mi.get("timbre_positioning", "")),
+                "persona_accent": str(mi.get("persona_accent", "")),
+                "dialect": str(mi.get("dialect", "")),
+                "role_play": str(mi.get("role_play", "")),
+                "seed_text": str(mi.get("seed_text", "")),
+                "gain": 0.0,
+                "vol": DEFAULT_MINIMAX_VOL,
+                "pitch": DEFAULT_MINIMAX_PITCH,
+                "emotion": "neutral",
+                "sample_rate": 44100,
+                "bitrate": DEFAULT_MINIMAX_BITRATE,
+                "channel": DEFAULT_MINIMAX_CHANNEL,
+                "subtitle_enable": False,
+            }
+
         sf = engine.get("siliconflow", {}) or {}
         fmt = str(sf.get("format", DEFAULT_API_FORMAT)).lower()
         sr_default = DEFAULT_SAMPLE_RATE_MP3_WAV if fmt in ("mp3", "wav") else DEFAULT_SAMPLE_RATE_OTHER
@@ -458,6 +534,14 @@ class ConfigManager:
             "bitrate": DEFAULT_MINIMAX_BITRATE,
             "channel": DEFAULT_MINIMAX_CHANNEL,
             "subtitle_enable": False,
+        }
+
+    def get_mimo_style_config(self) -> Dict[str, str]:
+        engine = self.get("tts_engine", {}) or {}
+        mi = engine.get("mimo", {}) or {}
+        return {
+            category: str(mi.get(category, "") or "").strip()
+            for category in MIMO_STYLE_CATEGORIES.keys()
         }
 
     # ------------------------------------------------------------------

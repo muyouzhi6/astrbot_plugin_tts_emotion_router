@@ -8,8 +8,9 @@
 
 ## ✨ 功能概览
 
-- 支持双 TTS 服务商：`siliconflow` / `minimax`
-- 情绪路由：按 `happy/sad/angry/neutral` 映射不同音色和语速
+- 支持多 TTS 服务商：`siliconflow` / `minimax` / `mimo`
+- 情绪路由：支持 18 种中文语境情绪，并可映射不同音色和语速
+- MiMo 支持情绪标签、唱歌、方言/角色等风格标签，以及对话中的一次性临时风格指定
 - 四类可独立配置策略（均支持 UMO 黑白名单）
   - 自动语音输出 `voice_output`
   - 文字+语音同时输出 `text_voice_output`
@@ -48,8 +49,21 @@
 - `tts_engine.provider` 可选：
   - `siliconflow`
   - `minimax`
+  - `mimo`
 
-### 3) MiniMax（已支持）
+### 3) MiMo（已支持）
+
+接口使用兼容 OpenAI Chat Completions 的 MiMo TTS 端点，支持：
+
+- 预置音色：`冰糖` / `茉莉` / `苏打` / `白桦` / `Mia` / `Chloe` / `Milo` / `Dean`
+- 18 种情绪标签：开心、悲伤、愤怒、恐惧、惊讶、兴奋、委屈、平静、冷漠、怅然、欣慰、无奈、愧疚、释然、嫉妒、厌倦、忐忑、动情
+- 唱歌标签（仅 `mimo-v2.5-tts` 支持）
+- MiMo 专属风格配置：整体语调、音色定位、人设腔调、方言、角色扮演
+- 对话临时指定风格/音色，例如“用东北话说……”“用冰糖的音色说……”
+
+通用 `voice_map` 默认保持空，避免将 MiMo 中文标签误传给其他服务商；使用 MiMo 时即使映射为空，也会根据情绪自动添加对应中文标签。
+
+### 4) MiniMax（已支持）
 
 接口使用 `https://api.minimaxi.com/v1/t2a_v2`，支持：
 
@@ -66,7 +80,7 @@
 - `subtitle_enable`
 - `pronunciation_dict`（可选）
 
-### 4) 情绪路由面板
+### 5) 情绪路由面板
 
 - `emotion_route.enable = true` 时显示子面板：
   - `voice_map`
@@ -75,7 +89,7 @@
   - `keywords`
 - 关闭后不显示映射配置，界面更简洁。
 
-### 5) 分段语音参数
+### 6) 分段语音参数
 
 - `segmented_tts.enable`
 - `interval_mode = fixed/adaptive`

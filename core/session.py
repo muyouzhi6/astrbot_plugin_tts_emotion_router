@@ -8,7 +8,7 @@ TTS Emotion Router - Session State
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 import time
 
 
@@ -16,9 +16,9 @@ import time
 class SessionState:
     """
     会话状态数据类。
-    
+
     用于跟踪每个会话（群组/用户）的 TTS 相关状态。
-    
+
     Attributes:
         last_ts: 最后一次 TTS 生成的时间戳（用于冷却计算）
         pending_emotion: 基于隐藏标记的待用情绪
@@ -38,6 +38,8 @@ class SessionState:
     """
     last_ts: float = 0.0
     pending_emotion: Optional[str] = None
+    pending_style_overrides: Optional[Dict[str, str]] = None
+    pending_voice: Optional[str] = None
     last_emotion: Optional[str] = None
     last_voice: Optional[str] = None
     last_tts_content: Optional[str] = None
@@ -54,18 +56,18 @@ class SessionState:
     text_voice_enabled: Optional[bool] = None
     suppress_next_llm_plain_text: bool = False
     suppress_next_llm_plain_text_until: float = 0.0
-    
+
     def update_tts_time(self) -> None:
         """更新最后 TTS 生成时间戳。"""
         now = time.time()
         self.last_ts = now
         self.last_tts_time = now
-    
+
     def set_tts_content(self, content: str) -> None:
         """设置最后的 TTS 内容。"""
         self.last_tts_content = content
         self.update_tts_time()
-    
+
     def set_assistant_text(self, text: str) -> None:
         """设置最近的助手文本。"""
         self.last_assistant_text = text.strip() if text else None
@@ -195,39 +197,52 @@ class SessionState:
             return False
         self.clear_next_llm_plain_text_suppression()
         return True
-    
+
     def consume_pending_emotion(self) -> Optional[str]:
-        """
-        消费并返回待用情绪。
-        
-        Returns:
-            待用情绪字符串，如果没有则返回 None
-        """
+        """消费并返回待用情绪。"""
         emotion = self.pending_emotion
         self.pending_emotion = None
         return emotion
-    
+
+    def set_pending_style_overrides(self, overrides: Dict[str, str]) -> None:
+        cleaned = {str(k): str(v).strip() for k, v in (overrides or {}).items() if str(v).strip()}
+        self.pending_style_overrides = cleaned or None
+
+    def consume_pending_style_overrides(self) -> Optional[Dict[str, str]]:
+        overrides = self.pending_style_overrides
+        self.pending_style_overrides = None
+        return overrides
+
+    def set_pending_voice(self, voice: str) -> None:
+        cleaned = str(voice or "").strip()
+        self.pending_voice = cleaned or None
+
+    def consume_pending_voice(self) -> Optional[str]:
+        voice = self.pending_voice
+        self.pending_voice = None
+        return voice
+
     def is_cooldown_expired(self, cooldown: int) -> bool:
         """
         检查冷却时间是否已过。
-        
+
         Args:
             cooldown: 冷却时间（秒）
-            
+
         Returns:
             如果冷却时间已过返回 True
         """
         if cooldown <= 0:
             return True
         return (time.time() - self.last_ts) >= cooldown
-    
+
     def get_remaining_cooldown(self, cooldown: int) -> float:
         """
         获取剩余冷却时间。
-        
+
         Args:
             cooldown: 冷却时间设置（秒）
-            
+
         Returns:
             剩余冷却时间（秒），如果已过冷却期返回 0
         """
@@ -241,47 +256,47 @@ class SessionState:
 class SessionManager:
     """
     会话状态管理器。
-    
+
     管理所有会话的状态，提供线程安全的访问接口。
     """
-    
+
     def __init__(self):
         """初始化会话管理器。"""
         self._sessions: Dict[str, SessionState] = {}
-    
+
     def get(self, session_id: str) -> SessionState:
         """
         获取或创建会话状态。
-        
+
         Args:
             session_id: 会话 ID
-            
+
         Returns:
             对应的会话状态对象
         """
         if session_id not in self._sessions:
             self._sessions[session_id] = SessionState()
         return self._sessions[session_id]
-    
+
     def get_or_none(self, session_id: str) -> Optional[SessionState]:
         """
         获取会话状态（不创建）。
-        
+
         Args:
             session_id: 会话 ID
-            
+
         Returns:
             会话状态对象，如果不存在返回 None
         """
         return self._sessions.get(session_id)
-    
+
     def remove(self, session_id: str) -> bool:
         """
         移除会话状态。
-        
+
         Args:
             session_id: 会话 ID
-            
+
         Returns:
             如果会话存在并被移除返回 True
         """
@@ -289,16 +304,16 @@ class SessionManager:
             del self._sessions[session_id]
             return True
         return False
-    
+
     def clear(self) -> None:
         """清空所有会话状态。"""
         self._sessions.clear()
-    
+
     @property
     def count(self) -> int:
         """获取当前会话数量。"""
         return len(self._sessions)
-    
+
     def __contains__(self, session_id: str) -> bool:
         """检查会话是否存在。"""
         return session_id in self._sessions
