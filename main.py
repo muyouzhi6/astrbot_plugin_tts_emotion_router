@@ -1452,10 +1452,19 @@ class TTSEmotionRouter(Star):
             Returns:
                 string: 发送结果文本（成功/失败说明）。
             """
+            if not self.config.is_llm_tool_enabled():
+                yield None
+                return
+
             content = (text or "").strip()
             if not content:
                 yield "文本为空"
                 return
+
+            max_chars = self.config.get_llm_tool_max_chars()
+            if max_chars > 0 and len(content) > max_chars:
+                logger.warning("tts_speak text truncated %d -> %d chars", len(content), max_chars)
+                content = content[:max_chars]
 
             ok, chain, history_or_error = await self._build_manual_tts_chain(event, content)
             if not ok:

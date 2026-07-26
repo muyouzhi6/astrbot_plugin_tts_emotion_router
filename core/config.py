@@ -674,3 +674,16 @@ class ConfigManager:
             self.get_segmented_tts_config().get("min_segment_length"),
             DEFAULT_SEGMENTED_MIN_SEGMENT_LENGTH,
         )
+
+    # ------------------------------------------------------------------
+    # LLM tool (tts_speak)
+    # ------------------------------------------------------------------
+
+    def _get_llm_tool_config(self) -> Dict[str, Any]:
+        return self.get("output_strategies", {}).get("llm_tool", {}) or {}
+
+    def is_llm_tool_enabled(self) -> bool:
+        return bool(self._get_llm_tool_config().get("enable", False))
+
+    def get_llm_tool_max_chars(self) -> int:
+        return _safe_int(self._get_llm_tool_config().get("max_chars"), 200)

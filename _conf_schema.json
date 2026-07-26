@@ -557,6 +557,24 @@
             "hint": "UMO 通过 /sid 获取。"
           }
         }
+      },
+      "llm_tool": {
+        "type": "object",
+        "description": "LLM 函数工具（tts_speak）",
+        "items": {
+          "enable": {
+            "type": "bool",
+            "description": "向 LLM 提供 tts_speak 函数工具",
+            "default": false,
+            "hint": "关闭后 LLM 看不到该函数，不影响自动语音/概率语音/tts_say 命令。开启时建议配置 max_chars 防止超长文本破产。"
+          },
+          "max_chars": {
+            "type": "int",
+            "description": "tts_speak 最大文本长度（超出截断）",
+            "default": 200,
+            "hint": "防止 LLM 被 @ 后朗读超长文本产生高额费用。0 表示不限制。"
+          }
+        }
       }
     }
   },
@@ -746,8 +764,8 @@
               "唱一首",
               "唱一句",
               "给你唱",
-              "唱",
-              "歌"
+              "唱给",
+              "清唱"
             ]
           },
           "fear": {
