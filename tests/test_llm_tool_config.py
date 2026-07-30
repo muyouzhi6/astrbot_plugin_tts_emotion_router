@@ -1,5 +1,6 @@
 """Regression tests for the tts_speak configuration path."""
 
+import ast
 import importlib
 import json
 import sys
@@ -56,6 +57,22 @@ class LlmToolConfigTest(unittest.TestCase):
             ]
         )
         self.assertIn(f"version: {PLUGIN_VERSION}", metadata)
+
+    def test_tts_speak_stops_after_direct_voice_send(self) -> None:
+        """Prevent the tool result from triggering a duplicate text response."""
+        module = ast.parse((PROJECT_ROOT / "main.py").read_text(encoding="utf-8"))
+        function = next(
+            node
+            for node in ast.walk(module)
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "tts_speak"
+        )
+
+        self.assertIsInstance(function.body[-2], ast.Expr)
+        yield_node = function.body[-2].value
+        self.assertIsInstance(yield_node, ast.Yield)
+        self.assertIsInstance(yield_node.value, ast.Constant)
+        self.assertIsNone(yield_node.value.value)
+        self.assertIsInstance(function.body[-1], ast.Return)
 
 
 if __name__ == "__main__":

@@ -1501,5 +1501,4 @@ class TTSEmotionRouter(Star):
                     await self._ensure_history_saved(event)
             event.clear_result()
             yield None
-            yield history_text or "语音已发送。"
             return
