@@ -1,14 +1,20 @@
+import asyncio
 import hashlib
 import json
-import time
+import logging
+import os
+import uuid
+import weakref
 from pathlib import Path
 from typing import Optional
 
-import logging
 import aiohttp
-import asyncio
 
-from ..utils.audio import validate_audio_file
+from ..utils.audio import append_audio_silence, validate_audio_file
+
+
+COSYVOICE_TAIL_PADDING_MS = 350
+CACHE_SCHEMA_VERSION = 2
 
 
 class SiliconFlowTTS:
@@ -35,6 +41,9 @@ class SiliconFlowTTS:
         self.gain = gain
         self.sample_rate = sample_rate
         self._session: Optional[aiohttp.ClientSession] = None
+        self._key_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
 
     async def close(self):
         """关闭 HTTP 会话"""
@@ -62,126 +71,190 @@ class SiliconFlowTTS:
             logging.error("SiliconFlowTTS: 缺少 api_url 或 api_key")
             return None
 
-        # 有效语速：优先使用传入值，其次使用全局默认
+        request_text = str(text or "")
+        is_cosyvoice = "cosyvoice" in str(self.model or "").lower()
+        tail_padding_ms = COSYVOICE_TAIL_PADDING_MS if is_cosyvoice else 0
+        if is_cosyvoice and request_text:
+            request_text = request_text.strip()
+            closing_chars = "\"'”’」』）》】）)]}"
+            suffix = ""
+            while request_text and request_text[-1] in closing_chars:
+                suffix = request_text[-1] + suffix
+                request_text = request_text[:-1].rstrip()
+            if request_text and request_text[-1] not in "。！？!?；;.…":
+                request_text += "。"
+            request_text += suffix
+
         eff_speed = float(speed) if speed is not None else float(self.speed)
 
-        # 缓存 key：文本+voice+model+speed+format+gain+sample_rate
         key = hashlib.sha256(
             json.dumps(
                 {
-                    "t": text,
+                    "cache_schema": CACHE_SCHEMA_VERSION,
+                    "t": request_text,
                     "v": voice,
                     "m": self.model,
                     "s": eff_speed,
                     "f": self.format,
                     "g": self.gain,
                     "sr": self.sample_rate,
+                    "tail_padding_ms": tail_padding_ms,
                 },
                 ensure_ascii=False,
             ).encode("utf-8")
         ).hexdigest()[:16]
         out_path = out_dir / f"{key}.{self.format}"
-        if out_path.exists() and out_path.stat().st_size > 0:
-            return out_path
+        key_lock = self._key_locks.get(key)
+        if key_lock is None:
+            key_lock = asyncio.Lock()
+            self._key_locks[key] = key_lock
 
-        url = f"{self.api_url}/audio/speech"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.model,
-            "voice": voice,
-            "input": text,
-            "response_format": self.format,
-            "speed": eff_speed,
-            "gain": self.gain,
-        }
-        if self.sample_rate:
-            payload["sample_rate"] = int(self.sample_rate)
+        async with key_lock:
+            if out_path.exists() and out_path.stat().st_size > 0:
+                if await validate_audio_file(
+                    out_path,
+                    expected_format=self.format,
+                    strict_format=True,
+                ):
+                    return out_path
+                await asyncio.to_thread(out_path.unlink, missing_ok=True)
 
-        last_err = None
-        backoff = 1.0
-        
-        # 懒加载 session
-        if self._session is None or self._session.closed:
-             client_timeout = aiohttp.ClientTimeout(total=self.timeout)
-             self._session = aiohttp.ClientSession(timeout=client_timeout)
+            url = f"{self.api_url}/audio/speech"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": self.model,
+                "voice": voice,
+                "input": request_text,
+                "response_format": self.format,
+                "speed": eff_speed,
+                "gain": self.gain,
+                "stream": False,
+            }
+            if self.sample_rate:
+                payload["sample_rate"] = int(self.sample_rate)
 
-        for attempt in range(1, self.max_retries + 2):  # 尝试(重试N次+首次)=N+1 次
-            try:
-                async with self._session.post(
-                    url, headers=headers, json=payload
-                ) as r:
-                    # 2xx
-                    if 200 <= r.status < 300:
-                        # Pylance might complain about headers type, but it is MultidictProxy
-                        content_type = r.headers.get("Content-Type", "") # type: ignore
-                        if not self._is_audio_response(content_type):
-                            # 可能是 JSON 错误
-                            try:
-                                err = await r.json()
-                            except Exception:
-                                text_content = await r.text()
-                                err = {"error": text_content[:200]}
-                            logging.error(
-                                f"SiliconFlowTTS: 返回非音频内容，code={r.status}, detail={err}"
+            last_err = None
+            backoff = 1.0
+
+            if self._session is None or self._session.closed:
+                client_timeout = aiohttp.ClientTimeout(total=self.timeout)
+                self._session = aiohttp.ClientSession(timeout=client_timeout)
+
+            for attempt in range(1, self.max_retries + 2):
+                raw_path = out_dir / (f".{key}.{uuid.uuid4().hex}.raw.{self.format}")
+                padded_path = out_dir / (
+                    f".{key}.{uuid.uuid4().hex}.padded.{self.format}"
+                )
+                try:
+                    async with self._session.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                    ) as response:
+                        if 200 <= response.status < 300:
+                            content_type = response.headers.get("Content-Type", "")
+                            if not self._is_audio_response(content_type):
+                                try:
+                                    err = await response.json()
+                                except Exception:
+                                    text_content = await response.text()
+                                    err = {"error": text_content[:200]}
+                                logging.error(
+                                    "SiliconFlowTTS: non-audio response, code=%s, detail=%s",
+                                    response.status,
+                                    err,
+                                )
+                                last_err = err
+                                break
+
+                            content = await response.read()
+                            await asyncio.to_thread(raw_path.write_bytes, content)
+                            if not await validate_audio_file(
+                                raw_path,
+                                expected_format=self.format,
+                                strict_format=True,
+                            ):
+                                last_err = {
+                                    "error": "Generated audio file validation failed"
+                                }
+                                continue
+
+                            ready_path = raw_path
+                            if tail_padding_ms > 0:
+                                try:
+                                    ready_path = await append_audio_silence(
+                                        raw_path,
+                                        padded_path,
+                                        tail_padding_ms,
+                                        audio_format=self.format,
+                                        sample_rate=self.sample_rate,
+                                    )
+                                    if not await validate_audio_file(
+                                        ready_path,
+                                        expected_format=self.format,
+                                        strict_format=True,
+                                    ):
+                                        last_err = {
+                                            "error": "Padded audio file validation failed"
+                                        }
+                                        continue
+                                except (RuntimeError, ValueError) as exc:
+                                    logging.warning(
+                                        "SiliconFlowTTS: tail padding unavailable; using original audio: %s",
+                                        exc,
+                                    )
+                                    ready_path = raw_path
+
+                            await asyncio.to_thread(os.replace, ready_path, out_path)
+                            logging.info(
+                                "SiliconFlowTTS: generated audio file: %s (%d bytes, tail_padding_ms=%d)",
+                                out_path,
+                                out_path.stat().st_size,
+                                tail_padding_ms,
                             )
-                            last_err = err
-                            break
-                        
-                        # 写入文件
-                        content = await r.read()
-                        
-                        def _write_file():
-                            with open(out_path, "wb") as f:
-                                f.write(content)
-                        await asyncio.to_thread(_write_file)
-                        
-                        # 验证生成的文件 (使用新的异步方法)
-                        if not await validate_audio_file(out_path, expected_format=self.format):
-                            logging.error(f"SiliconFlowTTS: 生成的文件验证失败: {out_path}")
-                            last_err = {"error": "Generated audio file validation failed"}
-                            break
-                        
-                        logging.info(f"SiliconFlowTTS: 成功生成音频文件: {out_path} ({out_path.stat().st_size}字节)")
-                        return out_path
+                            return out_path
 
-                    # 非 2xx
-                    err_detail = None
-                    try:
-                        err_detail = await r.json()
-                    except Exception:
-                        text_content = await r.text()
-                        err_detail = {"error": text_content[:200]}
+                        try:
+                            err_detail = await response.json()
+                        except Exception:
+                            text_content = await response.text()
+                            err_detail = {"error": text_content[:200]}
 
+                        logging.warning(
+                            "SiliconFlowTTS: request failed (%s) attempt=%s, detail=%s",
+                            response.status,
+                            attempt,
+                            err_detail,
+                        )
+                        last_err = err_detail
+                        if response.status in (429,) or 500 <= response.status < 600:
+                            if attempt <= self.max_retries:
+                                await asyncio.sleep(backoff)
+                                backoff = min(backoff * 2, 8)
+                                continue
+                        break
+                except Exception as e:
                     logging.warning(
-                        f"SiliconFlowTTS: 请求失败({r.status}) attempt={attempt}, detail={err_detail}"
+                        "SiliconFlowTTS: request or audio processing failed attempt=%s, err=%s",
+                        attempt,
+                        e,
                     )
-                    last_err = err_detail
-                    # 429 或 5xx 进行重试
-                    if r.status in (429,) or 500 <= r.status < 600:
-                        if attempt <= self.max_retries:
-                            await asyncio.sleep(backoff)
-                            backoff = min(backoff * 2, 8)
-                            continue
+                    last_err = str(e)
+                    if attempt <= self.max_retries:
+                        await asyncio.sleep(backoff)
+                        backoff = min(backoff * 2, 8)
+                        continue
                     break
-            except Exception as e:
-                logging.warning(f"SiliconFlowTTS: 网络异常 attempt={attempt}, err={e}")
-                last_err = str(e)
-                if attempt <= self.max_retries:
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, 8)
-                    continue
-                break
+                finally:
+                    await asyncio.to_thread(raw_path.unlink, missing_ok=True)
+                    await asyncio.to_thread(padded_path.unlink, missing_ok=True)
 
-        # 失败清理
-        try:
-            def _cleanup():
-                if out_path.exists() and out_path.stat().st_size == 0:
-                    out_path.unlink()
-            await asyncio.to_thread(_cleanup)
-        except Exception:
-            pass
-        logging.error(f"SiliconFlowTTS: 合成失败，已放弃。last_error={last_err}")
-        return None
+            await asyncio.to_thread(out_path.unlink, missing_ok=True)
+            logging.error(
+                "SiliconFlowTTS: synthesis failed after retries, last_error=%s",
+                last_err,
+            )
+            return None
