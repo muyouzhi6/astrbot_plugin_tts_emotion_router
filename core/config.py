@@ -7,7 +7,6 @@ import asyncio
 import copy
 import json
 import logging
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from .constants import (
@@ -178,6 +177,12 @@ class ConfigManager:
         ]:
             if feat not in fp:
                 fp[feat] = self._feature_defaults(default_enable)
+        llm_tool = fp.get("llm_tool", {}) or {}
+        if "enable" not in llm_tool:
+            llm_tool["enable"] = True
+        if "max_chars" not in llm_tool:
+            llm_tool["max_chars"] = 200
+        fp["llm_tool"] = llm_tool
         self._config["feature_policies"] = fp
 
         # Probability
@@ -680,10 +685,10 @@ class ConfigManager:
     # ------------------------------------------------------------------
 
     def _get_llm_tool_config(self) -> Dict[str, Any]:
-        return self.get("output_strategies", {}).get("llm_tool", {}) or {}
+        return self.get("feature_policies", {}).get("llm_tool", {}) or {}
 
     def is_llm_tool_enabled(self) -> bool:
-        return bool(self._get_llm_tool_config().get("enable", False))
+        return bool(self._get_llm_tool_config().get("enable", True))
 
     def get_llm_tool_max_chars(self) -> int:
         return _safe_int(self._get_llm_tool_config().get("max_chars"), 200)

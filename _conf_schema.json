@@ -565,7 +565,7 @@
           "enable": {
             "type": "bool",
             "description": "向 LLM 提供 tts_speak 函数工具",
-            "default": false,
+            "default": true,
             "hint": "关闭后 LLM 看不到该函数，不影响自动语音/概率语音/tts_say 命令。开启时建议配置 max_chars 防止超长文本破产。"
           },
           "max_chars": {
