@@ -66,6 +66,7 @@ from .core.text_splitter import TextSplitter
 from .emotion.classifier import HeuristicClassifier
 from .tts.provider_siliconflow import SiliconFlowTTS
 from .tts.provider_minimax import MiniMaxTTS
+from .tts.provider_breeze import BreezeTTS
 from .tts.provider_mimo import MiMoTTS, MIMO_EMOTION_TAGS_REVERSE, MIMO_VOICES
 from .utils.audio import ensure_dir, cleanup_dir
 from .utils.extract import CodeAndLinkExtractor
@@ -154,6 +155,25 @@ class TTSEmotionRouter(Star):
         api_cfg = api_cfg if api_cfg is not None else self.config.get_api_config()
         provider = api_cfg.get("provider", "siliconflow")
 
+        if provider == "breeze":
+            return BreezeTTS(
+                api_url=api_cfg["url"],
+                api_key=api_cfg["key"],
+                model=api_cfg["model"],
+                voice_id=api_cfg.get("voice_id", ""),
+                fmt=api_cfg["format"],
+                speed=api_cfg["speed"],
+                volume=api_cfg.get("volume", 1.0),
+                guidance_scale=api_cfg.get("guidance_scale", 1.0),
+                instructions=api_cfg.get("instructions", ""),
+                language_code=api_cfg.get("language_code", ""),
+                use_speaker_boost=api_cfg.get("use_speaker_boost", False),
+                emotion_instructions_enable=api_cfg.get("emotion_instructions_enable", True),
+                sample_rate=api_cfg.get("sample_rate", 24000),
+                max_retries=api_cfg.get("max_retries", 2),
+                timeout=api_cfg.get("timeout", 30),
+            )
+
         if provider == "minimax":
             return MiniMaxTTS(
                 api_url=api_cfg["url"],
@@ -224,6 +244,8 @@ class TTSEmotionRouter(Star):
             "voice_id", "voice", "sing_voice", "overall_tone", "timbre_positioning", "persona_accent", "dialect", "role_play", "director_enable", "director_role", "director_scene", "director_instruction", "director_context", "performance_tags_enable", "performance_tags", "vol", "pitch", "emotion", "bitrate", "channel", "subtitle_enable",
             "output_format", "language_boost", "proxy", "voice_modify", "timber_weights",
             "pronunciation_dict", "aigc_watermark", "max_retries", "timeout",
+            "volume", "guidance_scale", "instructions", "language_code",
+            "use_speaker_boost", "emotion_instructions_enable",
         )
         return tuple((k, str(api_cfg.get(k))) for k in keys)
 
@@ -1411,7 +1433,7 @@ class TTSEmotionRouter(Star):
             warnings = self.config.validation_warnings()
             if warnings:
                 yield event.plain_result("配置警告：" + "；".join(warnings))
-            for provider in ("siliconflow", "minimax", "mimo"):
+            for provider in ("siliconflow", "minimax", "mimo", "breeze"):
                 engine = copy.deepcopy(self.config.get("tts_engine", {}))
                 engine["provider"] = provider
                 cfg = ConfigManager({"tts_engine": engine}).get_api_config()

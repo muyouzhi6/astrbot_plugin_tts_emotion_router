@@ -143,3 +143,28 @@ def test_decoder_failure_never_rebills(monkeypatch, tmp_path, fault, existing):
         assert await client.synth('text', 'voice', tmp_path)
         assert client._calls == 1
     asyncio.run(run())
+
+
+def test_breeze_provider_factory(plugin_module):
+    module = plugin_module
+    plugin = module.TTSEmotionRouter(
+        SimpleNamespace(),
+        {
+            "tts_engine": {
+                "provider": "breeze",
+                "breeze": {
+                    "key": "test-key",
+                    "default_voice": "voc_test",
+                    "guidance_scale": 2.0,
+                },
+            }
+        },
+    )
+    try:
+        client = plugin.tts_client
+        assert type(client).__name__ == "BreezeTTS"
+        assert client.api_url == "https://api.breeze.blue/v1"
+        assert client.voice_id == "voc_test"
+        assert client.guidance_scale == 2.0
+    finally:
+        asyncio.run(plugin.terminate())

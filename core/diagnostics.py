@@ -1,6 +1,7 @@
 """Safe, cache-independent provider checks."""
 import asyncio
 import math
+import re
 import shutil
 import subprocess
 import tempfile
@@ -36,6 +37,18 @@ def configuration_errors(cfg, *, require_default_voice=True):
             errors.append(f"{field} 须在 {lower}～{upper} 之间")
     if cfg.get("format") not in ("mp3", "wav", "opus", "pcm", "flac"):
         errors.append("音频格式须为 mp3、wav、opus、pcm 或 flac")
+    if cfg.get("provider") == "breeze":
+        for field, lower, upper in (("volume", 0.01, 2), ("guidance_scale", 1, 10)):
+            try:
+                value = float(cfg[field])
+                valid = math.isfinite(value) and lower <= value <= upper
+            except (KeyError, TypeError, ValueError):
+                valid = False
+            if not valid:
+                errors.append(f"tts_engine.breeze.{field} 须在 {lower}～{upper} 之间")
+        language_code = str(cfg.get("language_code") or "").strip()
+        if language_code and not re.fullmatch(r"[A-Za-z]{2}", language_code):
+            errors.append("tts_engine.breeze.language_code 须为两位 ISO 639-1 语言代码，或留空")
     return errors
 
 
