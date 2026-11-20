@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.3.3 - 2026-10-30
+
+- 新增 Breeze Blue 服务商：`POST /v1/text-to-speech/{voice_id}`，使用 `xi-api-key` 鉴权。
+- Breeze 支持 `instructions`、`guidance_scale`、`volume`、`speed`、`use_speaker_boost` 与语言代码。
+- 按情绪自动追加中文表演指导，可关闭；`voice_map` 仍可按情绪映射不同 `voice_id`。
+- 自检、配置校验、状态命令与文档接入 Breeze。
+
 ## 3.3.0 - 2026-10-12
 
 - CosyVoice 待处理 WAV 恢复前校验完整帧和文件头，损坏文件删除后有界重试，避免截断尾音被保存为正常成品。

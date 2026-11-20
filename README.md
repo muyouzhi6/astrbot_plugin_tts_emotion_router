@@ -1,6 +1,6 @@
 # 🎭 AstrBot TTS 情绪路由插件
 
-[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](https://github.com/muyouzhi6/astrbot_plugin_tts_emotion_router)
+[![Version](https://img.shields.io/badge/version-3.3.3-blue.svg)](https://github.com/muyouzhi6/astrbot_plugin_tts_emotion_router)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 
@@ -8,9 +8,10 @@
 
 ## ✨ 功能概览
 
-- 支持多 TTS 服务商：`siliconflow` / `minimax` / `mimo`
+- 支持多 TTS 服务商：`siliconflow` / `minimax` / `mimo` / `breeze`
 - 情绪路由：支持 18 种中文语境情绪，并可映射不同音色和语速
 - MiMo 支持情绪标签、唱歌、方言/角色等风格标签、导演模式和显式表演标签白名单
+- Breeze Blue 支持 `instructions` 表演指导、`guidance_scale` 和按情绪自动追加中文指导
 - 四类可独立配置策略（均支持 UMO 黑白名单）
   - 自动语音输出 `voice_output`
   - 文字+语音同时输出 `text_voice_output`
@@ -24,7 +25,7 @@
 
 1. 在 AstrBot 插件市场安装并启用本插件。
 2. 在 AstrBot 运行环境安装 `ffmpeg`。本机部署执行 `ffmpeg -version`；Docker 部署执行 `docker exec <AstrBot容器名> ffmpeg -version`，宿主机安装不等于容器已安装。
-3. 在插件配置 → TTS 引擎选择服务商，填写 API Key、服务地址、模型和该模型支持的默认音色。SiliconFlow 的 `gpt-tts-pro` 与 CosyVoice 使用各自的音色 ID，不混用；克隆音色填写服务商返回的完整 ID。
+3. 在插件配置 → TTS 引擎选择服务商，填写 API Key、服务地址、模型和该模型支持的默认音色。SiliconFlow 的 `gpt-tts-pro` 与 CosyVoice 使用各自的音色 ID，不混用；克隆音色填写服务商返回的完整 ID。Breeze 的默认音色填写 `voc_` 开头的 voice_id。
 4. 发送 `/tts_say 你好，请听清最后一个字：好。`，确认收到并播放完整语音。
 5. 发送 `/tts_status` 查看状态；管理员可执行 `/tts_check`，对全部已配置服务商分别合成短音频并完整解码，会产生服务商费用。
 6. 在目标会话执行 `/tts_on`。新安装采用空白名单、关闭概率随机化；已有显式配置保留。群聊开关由 AstrBot 管理员操作，私聊用户可管理自己的会话。
@@ -67,6 +68,7 @@ SiliconFlow 最小配置（在插件配置面板填写）：
   - `siliconflow`
   - `minimax`
   - `mimo`
+  - `breeze`
 
 ### 3) MiMo（已支持）
 
@@ -108,7 +110,24 @@ SiliconFlow 最小配置（在插件配置面板填写）：
 - `subtitle_enable`
 - `pronunciation_dict`（可选）
 
-### 5) 情绪路由面板
+### 5) Breeze Blue（已支持）
+
+接口使用 `https://api.breeze.blue/v1` 的 `POST /text-to-speech/{voice_id}`，使用 `xi-api-key` 鉴权，返回二进制音频。配置项：
+
+- `model`：默认 `breeze-tts-2`，其他语言可用 `breeze-tts-2-multilingual`
+- `default_voice`：Breeze 音色 ID，如 `voc_xeh3w54cqvnp`
+- `format`：`mp3` / `wav` / `flac` / `opus` / `pcm`
+- `speed`：`0.5`～`2.0`，情绪路由的 `speed_map` 会覆盖
+- `volume`：`0.01`～`2.0` 线性音量倍率
+- `guidance_scale`：`1.0`～`10.0`，越高越贴近 `instructions`
+- `instructions`：自然语言表演指导，与朗读文本同语言
+- `language_code`：两位 ISO 639-1 代码，如 `zh`；留空由模型判断
+- `use_speaker_boost`：增强与参考音色的相似度
+- `emotion_instructions_enable`：默认开启，按情绪自动追加中文表演指导；非中文文本可关闭
+
+`voice_map` 可继续按情绪映射不同 Breeze 音色；只用一个音色时，情绪差异由自动情绪指导完成。API 说明见 [Breeze API reference](https://docs.breezeblue.ai/api-reference/introduction)，API Key 在 [Breeze 控制台](https://breezeblue.ai/app/developer/api-keys) 创建。
+
+### 6) 情绪路由面板
 
 - `emotion_route.enable = true` 时显示子面板：
   - `voice_map`
@@ -117,7 +136,7 @@ SiliconFlow 最小配置（在插件配置面板填写）：
   - `keywords`
 - 关闭后不显示映射配置，界面更简洁。
 
-### 6) 分段语音参数
+### 7) 分段语音参数
 
 自动分段中任一段合成失败时，改发完整原文；语音投递失败时，立即补发该段文字。
 

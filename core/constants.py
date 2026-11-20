@@ -9,7 +9,7 @@ import re
 PLUGIN_ID = "astrbot_plugin_tts_emotion_router"
 PLUGIN_NAME = "TTS 情绪路由"
 PLUGIN_DESC = "支持情绪路由、多服务商与会话策略的 TTS 插件。"
-PLUGIN_VERSION = "3.3.0"
+PLUGIN_VERSION = "3.3.3"
 PLUGIN_AUTHOR = "muyouzhi6"
 
 # Paths
@@ -246,6 +246,10 @@ DEFAULT_MINIMAX_CHANNEL: int = 1
 DEFAULT_MINIMAX_OUTPUT_FORMAT: str = "hex"
 DEFAULT_MINIMAX_LANGUAGE_BOOST: str = ""
 DEFAULT_MINIMAX_PROXY: str = ""
+
+DEFAULT_BREEZE_URL: str = "https://api.breeze.blue/v1"
+DEFAULT_BREEZE_MODEL: str = "breeze-tts-2"
+DEFAULT_BREEZE_SAMPLE_RATE: int = 24000
 
 MINIMAX_EXPRESSIVE_MODELS: Tuple[str, ...] = ("speech-2.8-hd", "speech-2.8-turbo")
 MINIMAX_EXPRESSIVE_TAGS: Tuple[str, ...] = (

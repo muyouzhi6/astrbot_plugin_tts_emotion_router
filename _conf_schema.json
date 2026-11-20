@@ -15,7 +15,8 @@
         "options": [
           "siliconflow",
           "minimax",
-          "mimo"
+          "mimo",
+          "breeze"
         ],
         "default": "siliconflow"
       },
@@ -81,6 +82,102 @@
             "type": "string",
             "description": "默认音色 ID（至少配置 neutral）",
             "default": ""
+          }
+        }
+      },
+      "breeze": {
+        "type": "object",
+        "description": "Breeze Blue 配置",
+        "condition": {
+          "provider": "breeze"
+        },
+        "items": {
+          "url": {
+            "type": "string",
+            "description": "API 地址",
+            "default": "https://api.breeze.blue/v1"
+          },
+          "key": {
+            "type": "string",
+            "description": "API Key",
+            "default": "",
+            "hint": "在 Breeze 控制台创建 brz_ 开头的 API Key。"
+          },
+          "model": {
+            "type": "string",
+            "description": "模型 ID",
+            "default": "breeze-tts-2",
+            "options": [
+              "breeze-tts-2",
+              "breeze-tts-2-multilingual"
+            ],
+            "hint": "中文/英文常用 breeze-tts-2；其他语言可用 multilingual 模型。"
+          },
+          "default_voice": {
+            "type": "string",
+            "description": "默认音色 voice_id",
+            "default": "",
+            "hint": "填写 Breeze 音色 ID，例如 voc_xxxxxxxx；可在 Breeze 控制台或 /v1/voices 查看。"
+          },
+          "format": {
+            "type": "string",
+            "description": "音频格式",
+            "options": [
+              "mp3",
+              "wav",
+              "flac",
+              "opus",
+              "pcm"
+            ],
+            "default": "mp3"
+          },
+          "sample_rate": {
+            "type": "int",
+            "description": "PCM 采样率",
+            "default": 24000,
+            "hint": "Breeze 原生输出 24 kHz；仅 pcm 格式需要。"
+          },
+          "speed": {
+            "type": "float",
+            "description": "默认语速",
+            "default": 1.0,
+            "hint": "范围 0.5～2.0；情绪路由的 speed_map 会覆盖此值。"
+          },
+          "volume": {
+            "type": "float",
+            "description": "音量倍率",
+            "default": 1.0,
+            "hint": "范围 0.01～2.0；不是响度归一化，过高可能削波。"
+          },
+          "guidance_scale": {
+            "type": "float",
+            "description": "指令遵循强度",
+            "default": 1.0,
+            "hint": "范围 1.0～10.0；越高越贴近 instructions，表现力场景可从 2～3 开始试听。"
+          },
+          "instructions": {
+            "type": "text",
+            "description": "表演指导",
+            "default": "",
+            "hint": "自然语言描述语气、情绪、节奏；请与朗读文本同语言。留空则只使用内置情绪指导。"
+          },
+          "language_code": {
+            "type": "string",
+            "description": "语言代码",
+            "default": "",
+            "hint": "两位 ISO 639-1 代码，如 zh、en；留空由模型自动判断。"
+          },
+          "use_speaker_boost": {
+            "type": "bool",
+            "description": "增强音色相似度",
+            "default": false,
+            "hint": "当 instructions 非空且 guidance_scale 大于 1 时，Breeze 会忽略该选项。"
+          },
+          "emotion_instructions_enable": {
+            "type": "bool",
+            "description": "情绪自动指导",
+            "default": true,
+            "hint": "开启后按 emotion_route 识别的情绪追加中文表演指导；若使用非中文文本可关闭。"
           }
         }
       },

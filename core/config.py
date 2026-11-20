@@ -17,6 +17,9 @@ from .constants import (
     DEFAULT_API_MODEL,
     DEFAULT_API_SPEED,
     DEFAULT_API_TIMEOUT,
+    DEFAULT_BREEZE_MODEL,
+    DEFAULT_BREEZE_SAMPLE_RATE,
+    DEFAULT_BREEZE_URL,
     DEFAULT_COOLDOWN,
     DEFAULT_EMO_MARKER_TAG,
     DEFAULT_EMOTION_KEYWORDS_LIST,
@@ -267,6 +270,27 @@ class ConfigManager:
                 mi[k] = v
         engine["mimo"] = mi
 
+        br = engine.get("breeze", {}) or {}
+        br_defaults = {
+            "url": DEFAULT_BREEZE_URL,
+            "key": "",
+            "model": DEFAULT_BREEZE_MODEL,
+            "default_voice": "",
+            "format": DEFAULT_API_FORMAT,
+            "speed": DEFAULT_API_SPEED,
+            "volume": 1.0,
+            "guidance_scale": 1.0,
+            "instructions": "",
+            "language_code": "",
+            "use_speaker_boost": False,
+            "emotion_instructions_enable": True,
+            "sample_rate": DEFAULT_BREEZE_SAMPLE_RATE,
+        }
+        for k, v in br_defaults.items():
+            if k not in br:
+                br[k] = v
+        engine["breeze"] = br
+
         mm = engine.get("minimax", {}) or {}
         mm_defaults = {
             "url": DEFAULT_MINIMAX_URL,
@@ -442,7 +466,7 @@ class ConfigManager:
     def get_tts_provider(self) -> str:
         engine = self.get("tts_engine", {}) or {}
         provider = str(engine.get("provider", DEFAULT_TTS_PROVIDER)).strip().lower()
-        return provider if provider in {"siliconflow", "minimax", "mimo"} else DEFAULT_TTS_PROVIDER
+        return provider if provider in {"siliconflow", "minimax", "mimo", "breeze"} else DEFAULT_TTS_PROVIDER
 
     def is_emotion_route_enabled(self) -> bool:
         return bool((self.get("emotion_route", {}) or {}).get("enable", True))
@@ -495,6 +519,36 @@ class ConfigManager:
                 "max_retries": max_retries,
                 "default_voice": str(mm.get("voice_id", DEFAULT_MINIMAX_VOICE_ID)),
                 "gain": 0.0,
+            }
+
+        if provider == "breeze":
+            br = engine.get("breeze", {}) or {}
+            voice_id = str(br.get("default_voice", "") or "")
+            return {
+                "provider": "breeze",
+                "url": str(br.get("url", DEFAULT_BREEZE_URL)).rstrip("/"),
+                "key": str(br.get("key", "")),
+                "model": str(br.get("model", DEFAULT_BREEZE_MODEL)),
+                "voice_id": voice_id,
+                "format": str(br.get("format", DEFAULT_API_FORMAT)).lower(),
+                "speed": _safe_float(br.get("speed"), DEFAULT_API_SPEED),
+                "volume": _safe_float(br.get("volume"), 1.0),
+                "guidance_scale": _safe_float(br.get("guidance_scale"), 1.0),
+                "instructions": str(br.get("instructions", "") or ""),
+                "language_code": str(br.get("language_code", "") or "").strip(),
+                "use_speaker_boost": bool(br.get("use_speaker_boost", False)),
+                "emotion_instructions_enable": bool(br.get("emotion_instructions_enable", True)),
+                "sample_rate": _safe_int(br.get("sample_rate"), DEFAULT_BREEZE_SAMPLE_RATE),
+                "timeout": timeout,
+                "max_retries": max_retries,
+                "default_voice": voice_id,
+                "gain": 0.0,
+                "vol": DEFAULT_MINIMAX_VOL,
+                "pitch": DEFAULT_MINIMAX_PITCH,
+                "emotion": "neutral",
+                "bitrate": DEFAULT_MINIMAX_BITRATE,
+                "channel": DEFAULT_MINIMAX_CHANNEL,
+                "subtitle_enable": False,
             }
 
         if provider == "mimo":
@@ -678,6 +732,9 @@ class ConfigManager:
         provider = self.get_tts_provider()
         provider_cfg = engine.get(provider, {})
         check(f"tts_engine.{provider}.speed", provider_cfg.get("speed", 1), 0.5, 2)
+        if provider == "breeze":
+            check("tts_engine.breeze.volume", provider_cfg.get("volume", 1.0), 0.01, 2)
+            check("tts_engine.breeze.guidance_scale", provider_cfg.get("guidance_scale", 1.0), 1, 10)
         segment = self.get_segmented_tts_config()
         for key, default in (("fixed_interval", 1.5), ("adaptive_buffer", 0.5),
                              ("max_segments", 10), ("min_segment_chars", 50),
